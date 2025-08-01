@@ -14,37 +14,43 @@ from .audio_source import UnifiedAudioInfo, AudioSourceType
 from .queue_manager import QueueManager, Song
 from .voice_manager import VoiceManager
 from .seek_manager import SeekManager, SeekResult
+from .queue_persistence import QueuePersistence
 from similubot.progress.base import ProgressCallback
 from similubot.utils.config_manager import ConfigManager
 
 
 class MusicPlayer:
     """
-    Core music player that orchestrates YouTube downloading, queue management,
-    and Discord voice playback.
+    音乐播放器核心类 - 支持队列持久化
+
+    协调 YouTube 下载、队列管理和 Discord 语音播放。
+    支持队列持久化，防止机器人重启时丢失队列数据。
     """
 
     def __init__(self, bot: commands.Bot, temp_dir: str = "./temp", config: Optional[ConfigManager] = None):
         """
-        Initialize the music player.
+        初始化音乐播放器
 
         Args:
-            bot: Discord bot instance
-            temp_dir: Directory for temporary audio files
-            config: Configuration manager for PoToken and other settings
+            bot: Discord 机器人实例
+            temp_dir: 临时音频文件目录
+            config: 配置管理器
         """
         self.logger = logging.getLogger("similubot.music.music_player")
         self.bot = bot
         self.temp_dir = temp_dir
         self.config = config
 
-        # Initialize components with config support
+        # 初始化组件
         self.youtube_client = YouTubeClient(temp_dir, config)
         self.catbox_client = CatboxClient(temp_dir)
         self.voice_manager = VoiceManager(bot)
         self.seek_manager = SeekManager()
 
-        # Guild-specific queue managers
+        # 初始化队列持久化管理器
+        self.queue_persistence = QueuePersistence() if config else None
+
+        # 服务器特定的队列管理器
         self._queue_managers: Dict[int, QueueManager] = {}
 
         # Playback state tracking
@@ -60,23 +66,68 @@ class MusicPlayer:
         self._inactivity_timers: Dict[int, asyncio.Task] = {}
         self._last_activity_times: Dict[int, float] = {}
 
-        self.logger.info("Music player initialized")
+        self.logger.info("🎵 音乐播放器初始化完成")
 
     def get_queue_manager(self, guild_id: int) -> QueueManager:
         """
-        Get or create a queue manager for a guild.
+        获取或创建服务器的队列管理器
 
         Args:
-            guild_id: Discord guild ID
+            guild_id: Discord 服务器 ID
 
         Returns:
-            QueueManager instance
+            QueueManager 实例
         """
         if guild_id not in self._queue_managers:
-            self._queue_managers[guild_id] = QueueManager(guild_id)
-            self.logger.debug(f"Created queue manager for guild {guild_id}")
+            # 创建队列管理器并设置持久化支持
+            queue_manager = QueueManager(guild_id, self.queue_persistence)
+            self._queue_managers[guild_id] = queue_manager
+            self.logger.debug(f"为服务器 {guild_id} 创建队列管理器")
 
         return self._queue_managers[guild_id]
+
+    async def initialize_persistence(self) -> None:
+        """
+        初始化持久化系统并恢复所有队列状态
+
+        应在机器人启动时调用此方法
+        """
+        if not self.queue_persistence:
+            self.logger.info("队列持久化未启用")
+            return
+
+        try:
+            self.logger.info("🔄 开始恢复队列状态...")
+
+            # 获取所有有保存状态的服务器
+            guild_ids = await self.queue_persistence.get_all_guild_ids()
+            if not guild_ids:
+                self.logger.info("没有找到需要恢复的队列状态")
+                return
+
+            restored_count = 0
+            for guild_id in guild_ids:
+                try:
+                    guild = self.bot.get_guild(guild_id)
+                    if not guild:
+                        self.logger.warning(f"无法找到服务器 {guild_id}，跳过恢复")
+                        continue
+
+                    # 获取队列管理器并恢复状态
+                    queue_manager = self.get_queue_manager(guild_id)
+                    success = await queue_manager.restore_from_persistence(guild)
+
+                    if success:
+                        restored_count += 1
+                        self.logger.info(f"✅ 服务器 {guild_id} 队列状态恢复成功")
+
+                except Exception as e:
+                    self.logger.error(f"恢复服务器 {guild_id} 队列状态时出错: {e}")
+
+            self.logger.info(f"队列恢复完成: {restored_count}/{len(guild_ids)} 个服务器成功恢复")
+
+        except Exception as e:
+            self.logger.error(f"初始化持久化系统时出错: {e}")
 
     def detect_audio_source_type(self, url: str) -> Optional[AudioSourceType]:
         """
@@ -768,10 +819,23 @@ class MusicPlayer:
                 # Start timing tracking
                 self._start_playback_timing(guild_id)
 
-                self.logger.info(f"Now playing: {song.title}")
+                self.logger.info(f"正在播放: {song.title}")
 
-                # Wait for playback to finish
-                await playback_finished.wait()
+                # 启动位置跟踪任务
+                position_task = asyncio.create_task(
+                    self._track_playback_position(guild_id, queue_manager)
+                )
+
+                try:
+                    # Wait for playback to finish
+                    await playback_finished.wait()
+                finally:
+                    # 停止位置跟踪
+                    position_task.cancel()
+                    try:
+                        await position_task
+                    except asyncio.CancelledError:
+                        pass
 
                 # Stop timing tracking
                 self._stop_playback_timing(guild_id)
@@ -788,6 +852,38 @@ class MusicPlayer:
             if guild_id in self._playback_tasks:
                 del self._playback_tasks[guild_id]
             await self._cleanup_current_audio(guild_id)
+
+    async def _track_playback_position(self, guild_id: int, queue_manager: QueueManager) -> None:
+        """
+        跟踪播放位置并定期更新到持久化存储
+
+        Args:
+            guild_id: 服务器 ID
+            queue_manager: 队列管理器
+        """
+        try:
+            update_interval = 15  # 每15秒更新一次位置
+
+            while True:
+                await asyncio.sleep(update_interval)
+
+                # 计算当前播放位置
+                current_position = self.get_current_playback_position(guild_id)
+
+                # 更新队列管理器的播放状态
+                queue_manager.update_position(current_position)
+
+                # 如果不在播放，停止跟踪
+                if not self.is_playing(guild_id):
+                    break
+
+        except asyncio.CancelledError:
+            # 播放被取消，最后更新一次状态
+            current_position = self.get_current_playback_position(guild_id)
+            queue_manager.update_position(current_position)
+            raise
+        except Exception as e:
+            self.logger.error(f"播放位置跟踪出错 - 服务器 {guild_id}: {e}")
 
     async def _cleanup_current_audio(self, guild_id: int) -> None:
         """

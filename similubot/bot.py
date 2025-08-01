@@ -50,6 +50,9 @@ class SimiluBot:
             help_command=None  # We'll use our custom help command
         )
 
+        # 存储对自身的引用，供事件处理器使用
+        self.bot._similu_bot = self
+
         # Initialize core components
         self._init_core_modules()
 

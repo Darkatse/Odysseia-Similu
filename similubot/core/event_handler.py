@@ -67,6 +67,14 @@ class EventHandler:
         )
         await self.bot.change_presence(activity=activity)
 
+        # 初始化持久化系统（如果可用）
+        try:
+            # 从 bot 实例获取 music_player 并初始化持久化
+            if hasattr(self.bot, '_similu_bot') and hasattr(self.bot._similu_bot, 'music_player'):
+                await self.bot._similu_bot.music_player.initialize_persistence()
+        except Exception as e:
+            self.logger.error(f"初始化持久化系统失败: {e}")
+
         self.logger.info("✅ Odysseia-Similu 音乐机器人已准备就绪")
 
     async def _on_message(self, message: discord.Message) -> None:

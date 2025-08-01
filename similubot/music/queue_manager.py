@@ -1,14 +1,18 @@
-"""Music queue management for SimiluBot."""
+"""音乐队列管理器 - 支持持久化的队列管理"""
 
 import logging
 import asyncio
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from dataclasses import dataclass, field
 from datetime import datetime
 import discord
 from .youtube_client import AudioInfo
 from .audio_source import UnifiedAudioInfo
 from typing import Union
+
+# 避免循环导入
+if TYPE_CHECKING:
+    from .queue_persistence import QueuePersistence
 
 
 @dataclass
@@ -41,61 +45,95 @@ class Song:
 
 class QueueManager:
     """
-    Manages the music queue for a Discord guild.
-    
-    Provides thread-safe queue operations with position tracking,
-    song metadata management, and queue persistence.
+    音乐队列管理器 - 管理 Discord 服务器的音乐队列
+
+    提供线程安全的队列操作，包括位置跟踪、歌曲元数据管理和队列持久化。
     """
 
-    def __init__(self, guild_id: int):
+    def __init__(self, guild_id: int, persistence: Optional['QueuePersistence'] = None):
         """
-        Initialize the queue manager.
-        
+        初始化队列管理器
+
         Args:
-            guild_id: Discord guild ID
+            guild_id: Discord 服务器 ID
+            persistence: 队列持久化管理器（可选）
         """
         self.logger = logging.getLogger("similubot.music.queue_manager")
         self.guild_id = guild_id
         self._queue: List[Song] = []
         self._current_song: Optional[Song] = None
         self._lock = asyncio.Lock()
-        
-        self.logger.debug(f"Queue manager initialized for guild {guild_id}")
+
+        # 持久化支持
+        self._persistence = persistence
+        self._current_position = 0.0  # 当前播放位置（秒）
+
+        self.logger.debug(f"队列管理器初始化完成 - 服务器 {guild_id}")
+
+    def set_persistence(self, persistence: 'QueuePersistence') -> None:
+        """设置队列持久化管理器"""
+        self._persistence = persistence
+
+    async def _save_state(self) -> None:
+        """保存当前队列状态到持久化存储"""
+        if self._persistence:
+            try:
+                await self._persistence.save_queue_state(
+                    guild_id=self.guild_id,
+                    current_song=self._current_song,
+                    queue=self._queue.copy(),
+                    current_position=self._current_position
+                )
+            except Exception as e:
+                self.logger.error(f"保存队列状态失败: {e}")
+
+    def update_position(self, position: float) -> None:
+        """更新当前播放位置"""
+        self._current_position = position
 
     async def add_song(self, audio_info: Union[AudioInfo, UnifiedAudioInfo], requester: discord.Member) -> int:
         """
-        Add a song to the queue.
-        
+        添加歌曲到队列
+
         Args:
-            audio_info: Audio information
-            requester: User who requested the song
-            
+            audio_info: 音频信息
+            requester: 请求用户
+
         Returns:
-            Position in queue (1-indexed)
+            队列中的位置（从1开始）
         """
         async with self._lock:
             song = Song(audio_info=audio_info, requester=requester)
             self._queue.append(song)
             position = len(self._queue)
-            
-            self.logger.info(f"Added song to queue: {song.title} (position {position})")
+
+            self.logger.info(f"添加歌曲到队列: {song.title} (位置 {position})")
+
+            # 保存状态
+            await self._save_state()
+
             return position
 
     async def get_next_song(self) -> Optional[Song]:
         """
-        Get the next song from the queue.
-        
+        从队列获取下一首歌曲
+
         Returns:
-            Next song or None if queue is empty
+            下一首歌曲，如果队列为空则返回 None
         """
         async with self._lock:
             if not self._queue:
                 return None
-            
+
             song = self._queue.pop(0)
             self._current_song = song
-            
-            self.logger.info(f"Retrieved next song: {song.title}")
+            self._current_position = 0.0  # 重置播放位置
+
+            self.logger.info(f"获取下一首歌曲: {song.title}")
+
+            # 保存状态
+            await self._save_state()
+
             return song
 
     async def skip_current_song(self) -> Optional[Song]:
@@ -144,18 +182,64 @@ class QueueManager:
 
     async def clear_queue(self) -> int:
         """
-        Clear the entire queue.
-        
+        清空整个队列
+
         Returns:
-            Number of songs removed
+            移除的歌曲数量
         """
         async with self._lock:
             count = len(self._queue)
             self._queue.clear()
             self._current_song = None
-            
-            self.logger.info(f"Cleared queue: {count} songs removed")
+            self._current_position = 0.0
+
+            self.logger.info(f"清空队列: 移除了 {count} 首歌曲")
+
+            # 保存状态
+            await self._save_state()
+
             return count
+
+    async def restore_from_persistence(self, guild: discord.Guild) -> bool:
+        """
+        从持久化存储恢复队列状态
+
+        Args:
+            guild: Discord 服务器对象
+
+        Returns:
+            恢复是否成功
+        """
+        if not self._persistence:
+            return False
+
+        try:
+            restored_data = await self._persistence.load_queue_state(self.guild_id, guild)
+            if not restored_data:
+                return False
+
+            async with self._lock:
+                # 恢复队列数据
+                self._current_song = restored_data.get('current_song')
+                self._queue = restored_data.get('queue', [])
+                self._current_position = restored_data.get('current_position', 0.0)
+
+                invalid_songs = restored_data.get('invalid_songs', [])
+
+                self.logger.info(
+                    f"队列状态恢复成功 - 服务器 {self.guild_id}: "
+                    f"当前歌曲: {'是' if self._current_song else '否'}, "
+                    f"队列长度: {len(self._queue)}"
+                )
+
+                if invalid_songs:
+                    self.logger.warning(f"恢复时发现无效歌曲: {invalid_songs}")
+
+                return True
+
+        except Exception as e:
+            self.logger.error(f"从持久化存储恢复队列状态失败: {e}")
+            return False
 
     async def get_queue_info(self) -> Dict[str, Any]:
         """

@@ -69,7 +69,8 @@ class MusicCommands:
             "!music skip - Skip to next song",
             "!music stop - Stop playback and clear queue",
             "!music jump <number> - Jump to specific position in queue",
-            "!music seek <time> - Seek to position (e.g., 1:30, +30, -1:00)"
+            "!music seek <time> - Seek to position (e.g., 1:30, +30, -1:00)",
+            "!music status - Show queue persistence status"
         ]
 
         help_text = (
@@ -114,6 +115,8 @@ class MusicCommands:
             await self._handle_jump_command(ctx, list(args[1:]))
         elif subcommand in ["seek", "goto_time"]:
             await self._handle_seek_command(ctx, list(args[1:]))
+        elif subcommand in ["persistence", "persist", "status"]:
+            await self.persistence_status(ctx)
         elif self.music_player.is_supported_url(subcommand):
             # First argument is a supported audio URL (YouTube or Catbox)
             await self._handle_play_command(ctx, subcommand)
@@ -659,6 +662,63 @@ class MusicCommands:
         )
 
         await message.edit(content=None, embed=embed)
+
+    async def persistence_status(self, ctx: commands.Context) -> None:
+        """
+        显示队列持久化状态信息
+
+        Args:
+            ctx: Discord 命令上下文
+        """
+        if not self._enabled:
+            await ctx.send("❌ 音乐功能已禁用")
+            return
+
+        try:
+            # 获取持久化统计信息
+            if hasattr(self.music_player, 'queue_persistence') and self.music_player.queue_persistence:
+                stats = self.music_player.queue_persistence.get_persistence_stats()
+
+                embed = discord.Embed(
+                    title="📊 队列持久化状态",
+                    color=discord.Color.blue()
+                )
+
+                embed.add_field(
+                    name="🔧 基本信息",
+                    value=f"持久化已启用: ✅\n"
+                          f"数据目录: `{stats.get('data_directory', 'N/A')}`\n"
+                          f"自动保存: {'✅' if stats.get('auto_save_enabled', False) else '❌'}",
+                    inline=False
+                )
+
+                embed.add_field(
+                    name="📈 统计信息",
+                    value=f"活动队列: {len(self.music_player._queue_managers)}\n"
+                          f"队列文件: {stats.get('queue_files', 0)}\n"
+                          f"播放任务: {len(self.music_player._playback_tasks)}",
+                    inline=True
+                )
+
+                embed.add_field(
+                    name="💾 存储信息",
+                    value=f"缓存服务器: {stats.get('cached_guilds', 0)}\n"
+                          f"备份文件: {stats.get('backup_files', 0)}",
+                    inline=True
+                )
+
+            else:
+                embed = discord.Embed(
+                    title="📊 队列持久化状态",
+                    description="❌ 队列持久化未启用",
+                    color=discord.Color.orange()
+                )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            self.logger.error(f"获取持久化状态失败: {e}")
+            await ctx.send("❌ 获取持久化状态时发生错误")
 
     async def cleanup(self) -> None:
         """Clean up music commands resources."""
