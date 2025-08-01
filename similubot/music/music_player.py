@@ -392,6 +392,30 @@ class MusicPlayer:
 
         return max(0.0, elapsed - total_paused)
 
+    def is_playing(self, guild_id: int) -> bool:
+        """
+        检查指定服务器是否正在播放音频
+
+        Args:
+            guild_id: Discord 服务器 ID
+
+        Returns:
+            如果正在播放则返回 True，否则返回 False
+        """
+        return self.voice_manager.is_playing(guild_id)
+
+    def is_paused(self, guild_id: int) -> bool:
+        """
+        检查指定服务器的播放是否暂停
+
+        Args:
+            guild_id: Discord 服务器 ID
+
+        Returns:
+            如果暂停则返回 True，否则返回 False
+        """
+        return self.voice_manager.is_paused(guild_id)
+
     def _start_playback_timing(self, guild_id: int) -> None:
         """
         Start tracking playback timing for a guild.
