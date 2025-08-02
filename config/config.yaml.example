@@ -1,56 +1,67 @@
 # Odysseia-Similu 音乐机器人配置
 
-# Discord Bot Configuration
+# Discord 机器人配置
 discord:
-  token: "YOUR_DISCORD_BOT_TOKEN_HERE"
-  command_prefix: "!"
+  token: "YOUR_DISCORD_BOT_TOKEN_HERE"  # 在此处填入您的 Discord 机器人令牌
+  command_prefix: "!"  # 命令前缀，用户需要在命令前输入此符号
 
-# Download Configuration
+# 下载配置
 download:
-  temp_dir: "./temp"
+  temp_dir: "./temp"  # 临时文件存储目录
 
-# Music Playback Configuration
+# 音乐播放配置
 music:
-  enabled: true  # Set to false to disable music functionality
-  max_queue_size: 100  # Maximum number of songs in queue per guild
-  max_song_duration: 3600  # Maximum song duration in seconds (1 hour)
-  auto_disconnect_timeout: 300  # Auto-disconnect after inactivity in seconds (5 minutes)
-  volume: 0.5  # Default playback volume (0.0-1.0)
+  enabled: true  # 设置为 false 可禁用音乐功能
+  max_queue_size: 100  # 每个服务器队列中的最大歌曲数量
+  max_song_duration: 3600  # 最大歌曲时长（秒），此处为1小时
+  auto_disconnect_timeout: 300  # 无活动后自动断开连接的时间（秒），此处为5分钟
+  volume: 0.5  # 默认播放音量（0.0-1.0）
   ffmpeg_options:
-    before: "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"  # FFmpeg options before input
-    options: "-vn"  # FFmpeg options (no video)
+    before: "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"  # 输入前的 FFmpeg 选项
+    options: "-vn"  # FFmpeg 选项（无视频）
 
-  # YouTube PoToken Configuration (Bot Detection Bypass)
+  # YouTube PoToken 配置（绕过机器人检测）
   youtube:
-    # Automatic bot detection handling
-    auto_fallback_on_bot_detection: true  # Automatically try fallback methods when bot detection occurs
+    # 自动机器人检测处理
+    auto_fallback_on_bot_detection: true  # 当检测到机器人时自动尝试备用方法
 
-    # PoToken settings
+    # PoToken 设置
     potoken:
-      enabled: false  # Set to true to enable PoToken usage
-      auto_generate: true  # Automatically generate PoToken using nodejs (requires nodejs installed)
-      client: "WEB"  # Client type for PoToken: "WEB", "WEB_EMBED", "ANDROID", "MWEB"
+      enabled: false  # 设置为 true 启用 PoToken 使用
+      auto_generate: true  # 使用 nodejs 自动生成 PoToken（需要安装 nodejs）
+      client: "WEB"  # PoToken 客户端类型："WEB"、"WEB_EMBED"、"ANDROID"、"MWEB"
 
-      # Manual PoToken configuration (used when auto_generate is false)
+      # 手动 PoToken 配置（当 auto_generate 为 false 时使用）
       manual:
-        visitor_data: ""  # Manual visitorData (leave empty to prompt)
-        po_token: ""  # Manual PoToken (leave empty to prompt)
+        visitor_data: ""  # 手动 visitorData（留空则提示输入）
+        po_token: ""  # 手动 PoToken（留空则提示输入）
 
-      # PoToken caching
-      cache_enabled: true  # Cache PoToken and visitorData for reuse
+      # PoToken 缓存
+      cache_enabled: true  # 缓存 PoToken 和 visitorData 以供重复使用
 
-    # Fallback configuration
+    # 备用配置
     fallback:
-      # Fallback chain when bot detection occurs:
-      # 1. Switch to WEB client with auto PoToken generation (if nodejs available)
-      # 2. Use manual PoToken (if configured)
-      # 3. Prompt for manual PoToken input
-      use_web_client: true  # Try WEB client as first fallback
-      prompt_for_manual_potoken: false  # Prompt for manual PoToken as last resort (not recommended for bots)
+      # 机器人检测发生时的备用链：
+      # 1. 切换到 WEB 客户端并自动生成 PoToken（如果有 nodejs）
+      # 2. 使用手动 PoToken（如果已配置）
+      # 3. 提示手动输入 PoToken
+      use_web_client: true  # 尝试 WEB 客户端作为第一备用方案
+      prompt_for_manual_potoken: false  # 提示手动 PoToken 作为最后手段（不推荐用于机器人）
 
-# Logging Configuration
+# 重复检测配置
+duplicate_detection:
+  # 队列长度阈值
+  # 当队列总长度（包括当前播放歌曲）小于此值时，允许用户重复添加已请求的歌曲
+  # 当队列总长度大于等于此值时，保持原有的重复检测保护
+  #
+  # 默认值: 5
+  # 最小值: 1
+  # 推荐值: 3-7（根据服务器活跃度调整）
+  queue_length_threshold: 5
+
+# 日志配置
 logging:
-  level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
-  file: "./logs/Odysseia-similu.log"
-  max_size: 10485760  # 10 MB
-  backup_count: 5
+  level: "INFO"  # 日志级别选项：DEBUG、INFO、WARNING、ERROR、CRITICAL
+  file: "./logs/Odysseia-similu.log"  # 日志文件路径
+  max_size: 10485760  # 最大日志文件大小（字节），此处为 10 MB
+  backup_count: 5  # 保留的备份日志文件数量
