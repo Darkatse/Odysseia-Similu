@@ -81,7 +81,7 @@ class PlaybackEngine(IPlaybackEngine):
             队列管理器实例
         """
         if guild_id not in self._queue_managers:
-            queue_manager = QueueManager(guild_id, self.persistence_manager)
+            queue_manager = QueueManager(guild_id, self.persistence_manager, self.config)
             self._queue_managers[guild_id] = queue_manager
             self.logger.debug(f"为服务器 {guild_id} 创建队列管理器")
         
@@ -118,14 +118,24 @@ class PlaybackEngine(IPlaybackEngine):
             
             # 添加到队列
             queue_manager = self.get_queue_manager(guild_id)
-            position = await queue_manager.add_song(audio_info, requester)
-            
+            try:
+                position = await queue_manager.add_song(audio_info, requester)
+            except Exception as e:
+                # 检查是否是队列相关错误（重复歌曲或队列公平性）
+                error_msg = str(e)
+                if ("已经请求了这首歌曲" in error_msg or
+                    "已经有" in error_msg and "首歌曲在队列中" in error_msg or
+                    "正在播放中" in error_msg):
+                    return False, None, error_msg
+                else:
+                    raise  # 重新抛出其他异常
+
             self.logger.info(f"歌曲添加到队列 - 服务器 {guild_id}: {audio_info.title} (位置 {position})")
-            
+
             # 如果没有正在播放，开始播放
             if not self.is_playing(guild_id):
                 await self._start_playback_if_needed(guild_id)
-            
+
             return True, position, None
             
         except Exception as e:
@@ -385,6 +395,9 @@ class PlaybackEngine(IPlaybackEngine):
             def after_playing(error):
                 if error:
                     self.logger.error(f"播放出错: {error}")
+                # 通知队列管理器歌曲播放完成（用于重复检测）
+                queue_manager = self.get_queue_manager(guild_id)
+                queue_manager.notify_song_finished(song)
                 # 清理播放时间跟踪
                 self._cleanup_playback_tracking(guild_id)
                 playback_finished.set()
@@ -424,6 +437,9 @@ class PlaybackEngine(IPlaybackEngine):
             def after_playing(error):
                 if error:
                     self.logger.error(f"播放出错: {error}")
+                # 通知队列管理器歌曲播放完成（用于重复检测）
+                queue_manager = self.get_queue_manager(guild_id)
+                queue_manager.notify_song_finished(song)
                 # 清理播放时间跟踪
                 self._cleanup_playback_tracking(guild_id)
                 playback_finished.set()

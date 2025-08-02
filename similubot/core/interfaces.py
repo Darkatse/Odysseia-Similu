@@ -108,6 +108,31 @@ class IQueueManager(ABC):
         """更新播放位置"""
         pass
 
+    @abstractmethod
+    def check_duplicate_for_user(self, audio_info: AudioInfo, user: discord.Member) -> bool:
+        """检查歌曲是否为指定用户的重复请求"""
+        pass
+
+    @abstractmethod
+    def get_user_song_count(self, user: discord.Member) -> int:
+        """获取用户当前在队列中的歌曲数量"""
+        pass
+
+    @abstractmethod
+    def notify_song_finished(self, song: 'SongInfo') -> None:
+        """通知歌曲播放完成，从重复检测器中移除"""
+        pass
+
+    @abstractmethod
+    def get_user_queue_status(self, user: discord.Member) -> Dict[str, Any]:
+        """获取用户的详细队列状态"""
+        pass
+
+    @abstractmethod
+    def can_user_add_song(self, audio_info: AudioInfo, user: discord.Member) -> Tuple[bool, str]:
+        """检查用户是否可以添加歌曲（综合检查）"""
+        pass
+
 
 class IVoiceManager(ABC):
     """语音管理器接口 - 定义语音连接和播放控制"""

@@ -7,11 +7,37 @@
 
 import logging
 import asyncio
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import discord
 
 from similubot.core.interfaces import IQueueManager, IPersistenceManager, AudioInfo, SongInfo
 from .song import Song
+from .duplicate_detector import DuplicateDetector
+
+
+class DuplicateSongError(Exception):
+    """
+    重复歌曲异常
+
+    当用户尝试添加已经在队列中的歌曲时抛出。
+    """
+    def __init__(self, message: str, song_title: str, user_name: str):
+        super().__init__(message)
+        self.song_title = song_title
+        self.user_name = user_name
+
+
+class QueueFairnessError(Exception):
+    """
+    队列公平性异常
+
+    当用户违反队列公平性规则时抛出（例如：已有歌曲在队列中时尝试添加新歌曲）。
+    """
+    def __init__(self, message: str, song_title: str, user_name: str, pending_count: int = 0):
+        super().__init__(message)
+        self.song_title = song_title
+        self.user_name = user_name
+        self.pending_count = pending_count
 
 
 class QueueManager(IQueueManager):
@@ -22,30 +48,62 @@ class QueueManager(IQueueManager):
     遵循单一职责原则，专注于队列管理逻辑。
     """
     
-    def __init__(self, guild_id: int, persistence_manager: Optional[IPersistenceManager] = None):
+    def __init__(self, guild_id: int, persistence_manager: Optional[IPersistenceManager] = None, config_manager=None):
         """
         初始化队列管理器
-        
+
         Args:
             guild_id: Discord服务器ID
             persistence_manager: 持久化管理器（可选）
+            config_manager: 配置管理器（可选）
         """
         self.guild_id = guild_id
         self.logger = logging.getLogger(f"similubot.queue.manager.{guild_id}")
-        
+        self._config_manager = config_manager
+
         # 队列状态
         self._queue: List[Song] = []
         self._current_song: Optional[Song] = None
         self._current_position = 0.0  # 当前播放位置（秒）
-        
+
         # 线程安全锁
         self._lock = asyncio.Lock()
-        
+
         # 持久化管理器
         self._persistence_manager = persistence_manager
-        
+
+        # 重复检测器
+        self._duplicate_detector = DuplicateDetector(guild_id, config_manager)
+
         self.logger.debug(f"队列管理器初始化完成 - 服务器 {guild_id}")
-    
+
+    def _remove_song_from_tracking(self, song: 'Song') -> None:
+        """
+        从重复检测器中移除歌曲跟踪
+
+        这是一个集中的辅助方法，确保所有队列移除操作都同步更新重复检测状态。
+
+        Args:
+            song: 要移除跟踪的歌曲对象
+        """
+        self._duplicate_detector.remove_song_for_user(song.audio_info, song.requester)
+        self.logger.debug(
+            f"移除重复跟踪 - 用户 {song.requester.display_name}: {song.title}"
+        )
+
+    def _remove_song_from_duplicate_tracking(self, song: 'Song') -> None:
+        """
+        从重复检测器中移除歌曲
+
+        这是一个内部辅助方法，确保每当歌曲从队列中移除时，
+        都会同步更新重复检测器的状态。
+
+        Args:
+            song: 要移除的歌曲对象
+        """
+        self._duplicate_detector.remove_song_for_user(song.audio_info, song.requester)
+        self.logger.debug(f"从重复跟踪中移除歌曲: {song.title} (用户: {song.requester.display_name})")
+
     def set_persistence_manager(self, persistence_manager: IPersistenceManager) -> None:
         """
         设置持久化管理器
@@ -72,46 +130,78 @@ class QueueManager(IQueueManager):
     async def add_song(self, audio_info: AudioInfo, requester: discord.Member) -> int:
         """
         添加歌曲到队列
-        
+
         Args:
             audio_info: 音频信息
             requester: 请求用户
-            
+
         Returns:
             队列中的位置（从1开始）
+
+        Raises:
+            DuplicateSongError: 当用户尝试添加重复歌曲时
         """
         async with self._lock:
+            # 计算当前队列长度（包括正在播放的歌曲）
+            current_queue_length = len(self._queue) + (1 if self._current_song else 0)
+
+            # 综合检查：重复检测 + 队列公平性
+            can_add, error_msg = self._duplicate_detector.can_user_add_song(audio_info, requester, current_queue_length)
+            if not can_add:
+                self.logger.info(
+                    f"阻止歌曲添加 - 用户 {requester.display_name} ({requester.id}): "
+                    f"{audio_info.title} - 原因: {error_msg} (队列长度: {current_queue_length})"
+                )
+
+                # 根据错误类型抛出相应的异常
+                if "已经请求了这首歌曲" in error_msg:
+                    raise DuplicateSongError(error_msg, audio_info.title, requester.display_name)
+                else:
+                    # 队列公平性错误
+                    pending_count = self._duplicate_detector.get_user_pending_count(requester)
+                    raise QueueFairnessError(error_msg, audio_info.title, requester.display_name, pending_count)
+
+            # 创建歌曲并添加到队列
             song = Song(audio_info=audio_info, requester=requester)
             self._queue.append(song)
             position = len(self._queue)
-            
+
+            # 添加到重复检测器
+            self._duplicate_detector.add_song_for_user(audio_info, requester)
+
             self.logger.info(f"添加歌曲到队列: {song.title} (位置 {position})")
-            
+
             # 保存状态
             await self._save_state()
-            
+
             return position
     
     async def get_next_song(self) -> Optional[SongInfo]:
         """
         从队列获取下一首歌曲
-        
+
         Returns:
             下一首歌曲，如果队列为空则返回None
         """
         async with self._lock:
             if not self._queue:
                 return None
-            
+
             song = self._queue.pop(0)
             self._current_song = song
             self._current_position = 0.0  # 重置播放位置
-            
+
+            # 通知重复检测器歌曲开始播放（用于队列公平性跟踪）
+            self._duplicate_detector.notify_song_started_playing(song.audio_info, song.requester)
+
+            # 注意：不在这里移除重复跟踪，而是在歌曲播放完成时移除
+            # 这样可以防止用户在歌曲播放期间重复添加相同歌曲
+
             self.logger.info(f"获取下一首歌曲: {song.title}")
-            
+
             # 保存状态
             await self._save_state()
-            
+
             return song
     
     async def skip_current_song(self) -> Optional[SongInfo]:
@@ -133,79 +223,95 @@ class QueueManager(IQueueManager):
     async def jump_to_position(self, position: int) -> Optional[SongInfo]:
         """
         跳转到队列中的指定位置
-        
+
         Args:
             position: 队列位置（从1开始）
-            
+
         Returns:
             指定位置的歌曲，如果位置无效则返回None
         """
         async with self._lock:
             if position < 1 or position > len(self._queue):
                 return None
-            
+
             # 移除目标位置之前的歌曲
             songs_to_remove = position - 1
             for _ in range(songs_to_remove):
                 if self._queue:
                     removed_song = self._queue.pop(0)
+                    # 从重复检测器中移除跳过的歌曲（使用集中的辅助方法）
+                    self._remove_song_from_tracking(removed_song)
                     self.logger.debug(f"跳转时移除歌曲: {removed_song.title}")
-            
+
             # 获取目标歌曲
             if self._queue:
                 song = self._queue.pop(0)
                 self._current_song = song
                 self._current_position = 0.0  # 重置播放位置
-                
+
+                # 从重复检测器中移除目标歌曲（使用集中的辅助方法）
+                self._remove_song_from_tracking(song)
+
                 self.logger.info(f"跳转到位置 {position}: {song.title}")
-                
+
                 # 保存状态
                 await self._save_state()
-                
+
                 return song
-            
+
             return None
     
     async def remove_song_at_position(self, position: int) -> Optional[SongInfo]:
         """
         移除指定位置的歌曲
-        
+
         Args:
             position: 队列位置（从1开始）
-            
+
         Returns:
             被移除的歌曲，如果位置无效则返回None
         """
         async with self._lock:
             if position < 1 or position > len(self._queue):
                 return None
-            
+
             removed_song = self._queue.pop(position - 1)
+
+            # 从重复检测器中移除歌曲
+            self._duplicate_detector.remove_song_for_user(
+                removed_song.audio_info, removed_song.requester
+            )
+
             self.logger.info(f"移除位置 {position} 的歌曲: {removed_song.title}")
-            
+
             # 保存状态
             await self._save_state()
-            
+
             return removed_song
     
     async def clear_queue(self) -> int:
         """
         清空整个队列
-        
+
         Returns:
             移除的歌曲数量
         """
         async with self._lock:
             count = len(self._queue)
+
+            # 从重复检测器中移除所有歌曲（这些歌曲不会正常播放完成）
+            for song in self._queue:
+                self._remove_song_from_tracking(song)
+
             self._queue.clear()
             self._current_song = None
             self._current_position = 0.0
-            
+
             self.logger.info(f"清空队列: 移除了 {count} 首歌曲")
-            
+
             # 保存状态
             await self._save_state()
-            
+
             return count
     
     def get_current_song(self) -> Optional[SongInfo]:
@@ -336,12 +442,18 @@ class QueueManager(IQueueManager):
                 self._queue = restored_data.get('queue', [])
                 self._current_position = restored_data.get('current_position', 0.0)
 
+                # 重建重复检测器状态
+                self._duplicate_detector.clear_all()
+                for song in self._queue:
+                    self._duplicate_detector.add_song_for_user(song.audio_info, song.requester)
+
                 invalid_songs = restored_data.get('invalid_songs', [])
-                
+
                 self.logger.info(
                     f"队列状态恢复成功 - 服务器 {self.guild_id}: "
                     f"当前歌曲: {'是' if self._current_song else '否'}, "
-                    f"队列长度: {len(self._queue)}"
+                    f"队列长度: {len(self._queue)}, "
+                    f"重复检测器跟踪歌曲: {self._duplicate_detector.get_total_tracked_songs()}"
                 )
 
                 if invalid_songs:
@@ -352,3 +464,94 @@ class QueueManager(IQueueManager):
         except Exception as e:
             self.logger.error(f"从持久化存储恢复队列状态失败: {e}")
             return False
+
+    def check_duplicate_for_user(self, audio_info: AudioInfo, user: discord.Member) -> bool:
+        """
+        检查歌曲是否为指定用户的重复请求
+
+        Args:
+            audio_info: 音频信息
+            user: Discord用户
+
+        Returns:
+            如果是重复请求则返回True
+        """
+        return self._duplicate_detector.is_duplicate_for_user(audio_info, user)
+
+    def get_user_song_count(self, user: discord.Member) -> int:
+        """
+        获取用户当前在队列中的歌曲数量
+
+        Args:
+            user: Discord用户
+
+        Returns:
+            歌曲数量
+        """
+        return self._duplicate_detector.get_user_song_count(user)
+
+    def get_duplicate_detection_stats(self) -> Dict[str, int]:
+        """
+        获取重复检测统计信息
+
+        Returns:
+            包含统计信息的字典
+        """
+        return {
+            'total_tracked_songs': self._duplicate_detector.get_total_tracked_songs(),
+            'total_users_with_songs': len(self._duplicate_detector._user_songs),
+            'total_users_with_pending': len(self._duplicate_detector._user_pending_songs),
+            'currently_playing_user': self._duplicate_detector.get_currently_playing_user()
+        }
+
+    def get_user_queue_status(self, user: discord.Member) -> Dict[str, Any]:
+        """
+        获取用户的详细队列状态
+
+        Args:
+            user: Discord用户
+
+        Returns:
+            包含用户队列状态的详细信息
+        """
+        # 计算当前队列长度（包括正在播放的歌曲）
+        current_queue_length = len(self._queue) + (1 if self._current_song else 0)
+        return self._duplicate_detector.get_user_queue_status(user, current_queue_length)
+
+    def can_user_add_song(self, audio_info: AudioInfo, user: discord.Member) -> Tuple[bool, str]:
+        """
+        检查用户是否可以添加歌曲
+
+        Args:
+            audio_info: 音频信息
+            user: Discord用户
+
+        Returns:
+            (是否可以添加, 错误消息)
+        """
+        # 计算当前队列长度（包括正在播放的歌曲）
+        current_queue_length = len(self._queue) + (1 if self._current_song else 0)
+        return self._duplicate_detector.can_user_add_song(audio_info, user, current_queue_length)
+
+    def notify_song_finished(self, song: SongInfo) -> None:
+        """
+        通知歌曲播放完成，更新所有相关跟踪状态
+
+        这个方法应该在歌曲实际播放完成时调用，用于：
+        1. 清除当前播放用户状态
+        2. 从重复检测跟踪中移除歌曲
+
+        Args:
+            song: 播放完成的歌曲
+        """
+        self._duplicate_detector.notify_song_finished_playing(song.audio_info, song.requester)
+        self.logger.debug(f"歌曲播放完成，更新跟踪状态: {song.title} - {song.requester.display_name}")
+
+    def _remove_song_from_tracking(self, song: SongInfo) -> None:
+        """
+        从重复检测器中移除歌曲的辅助方法
+
+        Args:
+            song: 要移除的歌曲
+        """
+        self._duplicate_detector.remove_song_for_user(song.audio_info, song.requester)

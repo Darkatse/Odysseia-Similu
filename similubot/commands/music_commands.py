@@ -165,7 +165,15 @@ class MusicCommands:
             )
 
             if not success:
-                await self._send_error_embed(response, "Failed to Add Song", error or "Unknown error")
+                # Check the type of error and provide appropriate feedback
+                if error and "已经请求了这首歌曲" in error:
+                    await self._send_duplicate_song_embed(response, error)
+                elif error and ("已经有" in error and "首歌曲在队列中" in error):
+                    await self._send_queue_fairness_embed(response, error)
+                elif error and "正在播放中" in error:
+                    await self._send_currently_playing_embed(response, error)
+                else:
+                    await self._send_error_embed(response, "Failed to Add Song", error or "Unknown error")
                 return
 
             # Get audio info for the added song based on source type
@@ -666,6 +674,90 @@ class MusicCommands:
             color=discord.Color.red()
         )
 
+        await message.edit(content=None, embed=embed)
+
+    async def _send_duplicate_song_embed(self, message: discord.Message, error_message: str) -> None:
+        """
+        Send duplicate song error embed message.
+
+        Args:
+            message: Message to edit
+            error_message: Duplicate error message
+        """
+        embed = discord.Embed(
+            title="🔄 重复歌曲",
+            description=error_message,
+            color=discord.Color.orange()
+        )
+        embed.add_field(
+            name="💡 提示",
+            value="等待当前歌曲播放完成后，您就可以再次请求这首歌曲了。",
+            inline=False
+        )
+        await message.edit(content=None, embed=embed)
+
+    async def _send_queue_fairness_embed(self, message: discord.Message, error_message: str) -> None:
+        """
+        Send queue fairness error embed message.
+
+        Args:
+            message: Message to edit
+            error_message: Queue fairness error message
+        """
+        embed = discord.Embed(
+            title="⚖️ 队列公平性限制",
+            description=error_message,
+            color=discord.Color.orange()
+        )
+        embed.add_field(
+            name="📋 队列规则",
+            value="为了保证所有用户的公平使用，每位用户同时只能有一首歌曲在队列中等待播放。",
+            inline=False
+        )
+
+        # 尝试获取队列状态信息
+        try:
+            if hasattr(self.music_player, 'get_queue_info'):
+                queue_info = await self.music_player.get_queue_info(message.guild.id)
+                if queue_info:
+                    embed.add_field(
+                        name="📊 当前队列状态",
+                        value=f"队列长度: {queue_info.get('queue_length', 0)} 首歌曲",
+                        inline=True
+                    )
+        except Exception:
+            pass  # 忽略获取队列信息的错误
+
+        embed.add_field(
+            name="💡 建议",
+            value="请等待您当前的歌曲播放完成后再添加新歌曲。",
+            inline=False
+        )
+        await message.edit(content=None, embed=embed)
+
+    async def _send_currently_playing_embed(self, message: discord.Message, error_message: str) -> None:
+        """
+        Send currently playing error embed message.
+
+        Args:
+            message: Message to edit
+            error_message: Currently playing error message
+        """
+        embed = discord.Embed(
+            title="🎵 歌曲正在播放",
+            description=error_message,
+            color=discord.Color.blue()
+        )
+        embed.add_field(
+            name="🎧 当前状态",
+            value="您的歌曲正在播放中，请耐心等待播放完成。",
+            inline=False
+        )
+        embed.add_field(
+            name="⏭️ 下一步",
+            value="歌曲播放完成后，您就可以添加新的歌曲了。",
+            inline=False
+        )
         await message.edit(content=None, embed=embed)
 
     async def persistence_status(self, ctx: commands.Context) -> None:
