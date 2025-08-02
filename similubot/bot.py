@@ -1,20 +1,21 @@
-"""Refactored main Discord bot implementation for SimiluBot."""
+"""重构后的 Odysseia-Similu 音乐机器人主实现"""
 import logging
 import os
 from typing import Optional
 import discord
 from discord.ext import commands
 
-# Core modules
+# 核心模块
 from similubot.core.command_registry import CommandRegistry
 from similubot.core.event_handler import EventHandler
 
-# Command modules
+# 命令模块
 from similubot.commands.general_commands import GeneralCommands
 from similubot.commands.music_commands import MusicCommands
 
-# Core modules
-from similubot.music.music_player import MusicPlayer
+# 新架构模块 - 使用重构后的播放引擎
+from similubot.playback.playback_engine import PlaybackEngine
+from similubot.adapters.music_player_adapter import MusicPlayerAdapter
 from similubot.utils.config_manager import ConfigManager
 
 
@@ -63,22 +64,28 @@ class SimiluBot:
         self._register_commands()
         self._setup_event_handlers()
 
+        # 设置机器人启动时的初始化任务
+        self.bot.add_listener(self._on_ready, 'on_ready')
+
         self.logger.info("🎵 音乐机器人初始化成功")
 
     def _init_core_modules(self) -> None:
-        """初始化核心机器人模块。"""
+        """初始化核心机器人模块"""
         # 创建临时目录（如果不存在）
         temp_dir = self.config.get('download.temp_dir', './temp')
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir)
             self.logger.debug(f"创建临时目录: {temp_dir}")
 
-        # 初始化音乐播放器
-        self.music_player = MusicPlayer(
+        # 初始化新架构的播放引擎
+        self.playback_engine = PlaybackEngine(
             bot=self.bot,
             temp_dir=temp_dir,
             config=self.config
         )
+
+        # 创建兼容性适配器，确保现有命令正常工作
+        self.music_player = MusicPlayerAdapter(self.playback_engine)
 
         # 初始化命令注册器（简化版，不需要授权系统）
         self.command_registry = CommandRegistry(
@@ -131,6 +138,19 @@ class SimiluBot:
         )
 
         self.logger.debug("事件处理器设置完成")
+
+    async def _on_ready(self) -> None:
+        """机器人就绪时的初始化任务"""
+        try:
+            self.logger.info(f"🤖 机器人已就绪: {self.bot.user}")
+
+            # 初始化持久化系统并恢复队列状态
+            if hasattr(self.music_player, 'initialize_persistence'):
+                await self.music_player.initialize_persistence()
+                self.logger.info("✅ 队列持久化系统初始化完成")
+
+        except Exception as e:
+            self.logger.error(f"机器人就绪初始化失败: {e}", exc_info=True)
 
     async def start(self, token: str) -> None:
         """

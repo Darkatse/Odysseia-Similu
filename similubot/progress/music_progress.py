@@ -7,8 +7,7 @@ from typing import Optional, Dict, Any, List
 import discord
 
 from .base import ProgressTracker, ProgressInfo, ProgressStatus, ProgressCallback
-from similubot.music.lyrics_client import NetEaseCloudMusicClient
-from similubot.music.lyrics_parser import LyricsParser, LyricLine
+from similubot.lyrics import LyricsManager, LyricLine
 
 
 class MusicProgressTracker(ProgressTracker):
@@ -287,11 +286,7 @@ class MusicProgressUpdater:
         self._active_progress_bars: Dict[int, asyncio.Task] = {}
 
         # Lyrics functionality
-        self.lyrics_client = NetEaseCloudMusicClient()
-        self.lyrics_parser = LyricsParser()
-
-        # Cache for lyrics to avoid repeated API calls
-        self._lyrics_cache: Dict[str, Optional[List[LyricLine]]] = {}
+        self.lyrics_manager = LyricsManager()
 
         # Track last update positions to catch missed lyrics during fast sections
         self._last_update_positions: Dict[int, float] = {}
@@ -361,57 +356,34 @@ class MusicProgressUpdater:
 
     async def get_song_lyrics(self, song) -> Optional[List[LyricLine]]:
         """
-        Get lyrics for a song, using cache if available.
+        获取歌曲的歌词，使用歌词管理器
 
         Args:
-            song: Song object with title and uploader information
+            song: 包含标题和上传者信息的歌曲对象
 
         Returns:
-            List of LyricLine objects, or None if no lyrics found
+            LyricLine对象列表，如果未找到歌词则返回None
         """
         try:
-            # Create cache key from song title and artist
-            cache_key = f"{song.title}|{song.uploader}"
+            self.logger.debug(f"获取歌词: {song.title} by {song.uploader}")
 
-            # Check cache first
-            if cache_key in self._lyrics_cache:
-                self.logger.debug(f"Using cached lyrics for: {song.title}")
-                return self._lyrics_cache[cache_key]
-
-            self.logger.debug(f"Fetching lyrics for: {song.title} by {song.uploader}")
-
-            # Search and fetch lyrics
-            lyrics_data = await self.lyrics_client.search_and_get_lyrics(
-                song.title, song.uploader
-            )
+            # 使用歌词管理器获取歌词
+            lyrics_data = await self.lyrics_manager.get_lyrics(song.title, song.uploader)
 
             if not lyrics_data:
-                self.logger.debug(f"No lyrics found for: {song.title}")
-                self._lyrics_cache[cache_key] = None
+                self.logger.debug(f"未找到歌词: {song.title}")
                 return None
 
-            # Parse lyrics
-            lyrics_lines = self.lyrics_parser.parse_lrc_lyrics(
-                lyrics_data.get('lyric', ''),
-                lyrics_data.get('sub_lyric', '')
-            )
-
-            if not lyrics_lines or self.lyrics_parser.is_instrumental_track(lyrics_lines):
-                self.logger.debug(f"Instrumental track or no valid lyrics: {song.title}")
-                self._lyrics_cache[cache_key] = None
+            # 检查是否为器乐曲
+            if self.lyrics_manager.is_instrumental_track(lyrics_data):
+                self.logger.debug(f"器乐曲或无有效歌词: {song.title}")
                 return None
 
-            # Cache the results
-            self._lyrics_cache[cache_key] = lyrics_lines
-            self.logger.info(f"Successfully cached lyrics for: {song.title} ({len(lyrics_lines)} lines)")
-
-            return lyrics_lines
+            self.logger.info(f"成功获取歌词: {song.title} ({len(lyrics_data.lyrics)} 行)")
+            return lyrics_data.lyrics
 
         except Exception as e:
-            self.logger.error(f"Error fetching lyrics for '{song.title}': {e}", exc_info=True)
-            # Cache the failure to avoid repeated attempts
-            cache_key = f"{song.title}|{song.uploader}"
-            self._lyrics_cache[cache_key] = None
+            self.logger.error(f"获取歌词时出错 '{song.title}': {e}", exc_info=True)
             return None
 
     def create_progress_embed(self, guild_id: int, song, lyrics: Optional[List[LyricLine]] = None) -> Optional[discord.Embed]:
@@ -524,12 +496,12 @@ class MusicProgressUpdater:
             # Get lyrics that occurred since last update (for fast-paced sections)
             interval_lyrics = []
             if last_position > 0 and current_position > last_position:
-                interval_lyrics = self.lyrics_parser.get_lyrics_since_last_update(
+                interval_lyrics = self.lyrics_manager.parser.get_lyrics_since_last_update(
                     lyrics, last_position, current_position, max_lines=4
                 )
 
             # Get current lyric context
-            context = self.lyrics_parser.get_lyric_context(lyrics, current_position, context_lines=1)
+            context = self.lyrics_manager.parser.get_lyric_context(lyrics, current_position, context_lines=1)
             current_line = context.get('current')
             next_lines = context.get('next', [])
 
@@ -553,13 +525,13 @@ class MusicProgressUpdater:
             # Display all current lyrics as bold
             if current_lyrics:
                 for lyric in current_lyrics:
-                    lyric_text = self.lyrics_parser.format_lyric_display(lyric, show_translation=True)
+                    lyric_text = self.lyrics_manager.format_lyric_display(lyric, show_translation=True)
                     if lyric_text:
                         display_parts.append(f"**{lyric_text}**")
             elif next_lines:
                 # Show upcoming lyric if no current lyrics
                 upcoming_line = next_lines[0]
-                formatted_text = self.lyrics_parser.format_lyric_display(upcoming_line)
+                formatted_text = self.lyrics_manager.format_lyric_display(upcoming_line)
                 display_parts.append(f"*Coming up:*\n{formatted_text}")
             else:
                 return "*No lyrics available at this time*"
@@ -569,7 +541,7 @@ class MusicProgressUpdater:
                 next_line = next_lines[0]
                 # Make sure the next line isn't already displayed as current
                 if not any(lyric.timestamp == next_line.timestamp for lyric in current_lyrics):
-                    next_text = self.lyrics_parser.format_lyric_display(next_line, show_translation=False)
+                    next_text = self.lyrics_manager.format_lyric_display(next_line, show_translation=False)
                     if next_text:
                         display_parts.append(f"*{next_text}*")
 
@@ -624,7 +596,7 @@ class MusicProgressUpdater:
 
             while update_count < max_updates:
                 # Check if song is still playing
-                current_song = await self.music_player.get_queue_manager(guild_id).get_current_song()
+                current_song = self.music_player.get_queue_manager(guild_id).get_current_song()
                 if not current_song or current_song.url != song.url:
                     self.logger.debug(f"Song changed or stopped, ending progress updates for guild {guild_id}")
                     break
@@ -685,7 +657,7 @@ class MusicProgressUpdater:
         """
         try:
             # Get current song
-            current_song = await self.music_player.get_queue_manager(guild_id).get_current_song()
+            current_song = self.music_player.get_queue_manager(guild_id).get_current_song()
             if not current_song:
                 return False
 

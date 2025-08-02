@@ -1,38 +1,38 @@
 """
-队列持久化管理器 - 轻量级音乐队列状态保存和恢复
+持久化管理器 - 处理队列状态的持久化存储
 
-实现音乐队列的持久化存储，防止机器人重启时丢失队列数据。
-使用 JSON 格式存储，专注于核心功能，保持简单高效。
+负责将队列状态保存到磁盘并在需要时恢复。
+使用JSON格式存储，提供完整的错误处理和数据验证。
 """
 
 import json
 import logging
-import os
 import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 import discord
 
-from .audio_source import UnifiedAudioInfo, AudioSourceType
+from similubot.core.interfaces import IPersistenceManager, SongInfo
+from .song import Song
 
 
-class QueuePersistence:
+class PersistenceManager(IPersistenceManager):
     """
-    队列持久化管理器
+    持久化管理器实现
     
-    负责将音乐队列状态保存到磁盘并在机器人重启时恢复。
-    使用 JSON 格式存储，专注于核心功能。
+    负责队列状态的保存和恢复，使用JSON格式存储。
+    提供数据验证、错误处理和备份机制。
     """
-
+    
     def __init__(self, data_dir: str = "data"):
         """
-        初始化队列持久化管理器
+        初始化持久化管理器
         
         Args:
             data_dir: 数据存储目录
         """
-        self.logger = logging.getLogger("similubot.music.queue_persistence")
+        self.logger = logging.getLogger("similubot.queue.persistence")
         self.data_dir = Path(data_dir)
         self.queues_dir = self.data_dir / "queues"
         
@@ -42,8 +42,8 @@ class QueuePersistence:
         # 保存锁，防止并发写入
         self._save_lock = asyncio.Lock()
         
-        self.logger.info(f"队列持久化管理器初始化完成 - 数据目录: {self.data_dir}")
-
+        self.logger.info(f"持久化管理器初始化完成 - 数据目录: {self.data_dir}")
+    
     def _ensure_directories(self) -> None:
         """确保所有必要的目录存在"""
         try:
@@ -53,79 +53,63 @@ class QueuePersistence:
         except Exception as e:
             self.logger.error(f"创建持久化目录失败: {e}")
             raise
-
+    
     def _get_queue_file_path(self, guild_id: int) -> Path:
         """获取指定服务器的队列文件路径"""
         return self.queues_dir / f"guild_{guild_id}.json"
-
-    def _song_to_dict(self, song) -> Dict[str, Any]:
-        """将 Song 对象转换为字典"""
+    
+    def _validate_song_data(self, song_data: Dict[str, Any]) -> bool:
+        """验证歌曲数据的完整性"""
+        required_fields = ['title', 'duration', 'url', 'uploader', 'requester_id', 'requester_name', 'added_at']
+        return all(field in song_data for field in required_fields)
+    
+    def _validate_queue_state_data(self, data: Dict[str, Any]) -> bool:
+        """验证队列状态数据的完整性"""
         try:
-            # 获取音频源类型
-            source_type = "youtube"  # 默认值
-            if hasattr(song.audio_info, 'source_type'):
-                source_type = song.audio_info.source_type.value
-            elif "catbox.moe" in song.url:
-                source_type = "catbox"
-
-            return {
-                "title": song.title,
-                "duration": song.duration,
-                "url": song.url,
-                "uploader": song.uploader,
-                "source_type": source_type,
-                "requester_id": song.requester.id,
-                "requester_name": song.requester.display_name,
-                "added_at": song.added_at.isoformat()
-            }
-        except Exception as e:
-            self.logger.error(f"转换歌曲到字典失败: {e}")
-            return None
-
-    def _dict_to_song(self, data: Dict[str, Any], guild: discord.Guild):
-        """将字典转换为 Song 对象"""
-        try:
-            # 获取请求者
-            requester = guild.get_member(data["requester_id"])
-            if not requester:
-                # 创建虚拟成员对象
-                class MockMember:
-                    def __init__(self, user_id: int, name: str, guild_obj: discord.Guild):
-                        self.id = user_id
-                        self.display_name = name
-                        self.guild = guild_obj
-                
-                requester = MockMember(data["requester_id"], data["requester_name"], guild)
-
-            # 创建音频信息对象
-            audio_info = UnifiedAudioInfo(
-                title=data["title"],
-                duration=data["duration"],
-                file_path=data["url"],
-                url=data["url"],
-                uploader=data["uploader"],
-                source_type=AudioSourceType(data.get("source_type", "youtube"))
-            )
-
-            # 导入 Song 类（避免循环导入）
-            from .queue_manager import Song
+            # 检查必要字段
+            if not isinstance(data.get('guild_id'), int):
+                return False
+            if not isinstance(data.get('queue'), list):
+                return False
+            if not isinstance(data.get('current_position'), (int, float)):
+                return False
             
-            return Song(
-                audio_info=audio_info,
-                requester=requester,
-                added_at=datetime.fromisoformat(data["added_at"])
-            )
-
+            # 验证队列中的歌曲数据
+            for song_data in data.get('queue', []):
+                if not self._validate_song_data(song_data):
+                    return False
+            
+            # 验证当前歌曲数据（如果存在）
+            current_song = data.get('current_song')
+            if current_song and not self._validate_song_data(current_song):
+                return False
+            
+            return True
+            
         except Exception as e:
-            self.logger.error(f"转换字典到歌曲失败: {e}")
-            return None
-
-    async def save_queue_state(self, guild_id: int, current_song, queue: List, current_position: float = 0.0) -> bool:
+            self.logger.error(f"验证队列状态数据时发生错误: {e}")
+            return False
+    
+    def _validate_song_url(self, song: Song) -> bool:
+        """验证歌曲URL是否有效（简单检查）"""
+        try:
+            url = song.url.lower()
+            return ("youtube.com" in url or "youtu.be" in url or "catbox.moe" in url)
+        except:
+            return False
+    
+    async def save_queue_state(
+        self, 
+        guild_id: int, 
+        current_song: Optional[SongInfo], 
+        queue: List[SongInfo], 
+        current_position: float = 0.0
+    ) -> bool:
         """
         保存队列状态到磁盘
         
         Args:
-            guild_id: 服务器 ID
+            guild_id: 服务器ID
             current_song: 当前播放的歌曲
             queue: 队列中的歌曲列表
             current_position: 当前播放位置（秒）
@@ -138,13 +122,14 @@ class QueuePersistence:
                 # 转换数据为可序列化格式
                 queue_data = []
                 for song in queue:
-                    song_dict = self._song_to_dict(song)
-                    if song_dict:
-                        queue_data.append(song_dict)
+                    if isinstance(song, Song):
+                        song_dict = song.to_dict()
+                        if song_dict:
+                            queue_data.append(song_dict)
 
                 current_song_data = None
-                if current_song:
-                    current_song_data = self._song_to_dict(current_song)
+                if current_song and isinstance(current_song, Song):
+                    current_song_data = current_song.to_dict()
 
                 # 创建保存数据
                 save_data = {
@@ -155,6 +140,11 @@ class QueuePersistence:
                     "last_updated": datetime.now().isoformat(),
                     "version": "1.0"
                 }
+
+                # 验证数据完整性
+                if not self._validate_queue_state_data(save_data):
+                    self.logger.error(f"队列状态数据验证失败 - 服务器 {guild_id}")
+                    return False
 
                 # 写入文件
                 file_path = self._get_queue_file_path(guild_id)
@@ -173,17 +163,17 @@ class QueuePersistence:
             except Exception as e:
                 self.logger.error(f"保存队列状态失败 - 服务器 {guild_id}: {e}")
                 return False
-
+    
     async def load_queue_state(self, guild_id: int, guild: discord.Guild) -> Optional[Dict[str, Any]]:
         """
         从磁盘加载队列状态
         
         Args:
-            guild_id: 服务器 ID
-            guild: Discord 服务器对象
+            guild_id: 服务器ID
+            guild: Discord服务器对象
             
         Returns:
-            包含队列状态的字典，如果加载失败则返回 None
+            包含队列状态的字典，如果加载失败则返回None
         """
         try:
             file_path = self._get_queue_file_path(guild_id)
@@ -198,20 +188,29 @@ class QueuePersistence:
             loop = asyncio.get_event_loop()
             data = await loop.run_in_executor(None, read_file)
 
-            # 转换为 Song 对象
+            # 验证数据完整性
+            if not self._validate_queue_state_data(data):
+                self.logger.warning(f"队列状态数据验证失败 - 服务器 {guild_id}")
+                return None
+
+            # 转换为Song对象
             restored_queue = []
             invalid_songs = []
             
             for song_data in data.get("queue", []):
-                song = self._dict_to_song(song_data, guild)
+                song = Song.from_dict(song_data, guild)
                 if song and self._validate_song_url(song):
                     restored_queue.append(song)
                 else:
                     invalid_songs.append(song_data.get("title", "Unknown"))
 
             current_song = None
-            if data.get("current_song"):
-                current_song = self._dict_to_song(data["current_song"], guild)
+            current_song_data = data.get("current_song")
+            if current_song_data:
+                current_song = Song.from_dict(current_song_data, guild)
+                if current_song and not self._validate_song_url(current_song):
+                    invalid_songs.append(current_song.title)
+                    current_song = None
 
             result = {
                 'current_song': current_song,
@@ -229,17 +228,17 @@ class QueuePersistence:
         except Exception as e:
             self.logger.error(f"加载队列状态失败 - 服务器 {guild_id}: {e}")
             return None
-
-    def _validate_song_url(self, song) -> bool:
-        """验证歌曲 URL 是否有效（简单检查）"""
-        try:
-            url = song.url.lower()
-            return ("youtube.com" in url or "youtu.be" in url or "catbox.moe" in url)
-        except:
-            return False
-
+    
     async def delete_queue_state(self, guild_id: int) -> bool:
-        """删除指定服务器的队列状态文件"""
+        """
+        删除指定服务器的队列状态文件
+        
+        Args:
+            guild_id: 服务器ID
+            
+        Returns:
+            删除是否成功
+        """
         try:
             file_path = self._get_queue_file_path(guild_id)
             if file_path.exists():
@@ -249,9 +248,14 @@ class QueuePersistence:
         except Exception as e:
             self.logger.error(f"删除队列状态文件失败 - 服务器 {guild_id}: {e}")
             return False
-
+    
     async def get_all_guild_ids(self) -> List[int]:
-        """获取所有有保存队列状态的服务器 ID"""
+        """
+        获取所有有保存队列状态的服务器ID
+        
+        Returns:
+            服务器ID列表
+        """
         try:
             guild_ids = []
             for file_path in self.queues_dir.glob("guild_*.json"):
@@ -263,13 +267,13 @@ class QueuePersistence:
                     continue
             return guild_ids
         except Exception as e:
-            self.logger.error(f"获取服务器 ID 列表失败: {e}")
+            self.logger.error(f"获取服务器ID列表失败: {e}")
             return []
-
+    
     def get_persistence_stats(self) -> Dict[str, Any]:
         """
         获取持久化系统统计信息
-
+        
         Returns:
             统计信息字典
         """
@@ -277,9 +281,8 @@ class QueuePersistence:
             stats = {
                 'persistence_enabled': True,
                 'data_directory': str(self.data_dir),
-                'auto_save_enabled': True,
                 'queue_files': len(list(self.queues_dir.glob("guild_*.json"))),
-                'backup_files': 0  # 简化版本不支持备份
+                'total_size_bytes': sum(f.stat().st_size for f in self.queues_dir.glob("guild_*.json"))
             }
             return stats
         except Exception as e:

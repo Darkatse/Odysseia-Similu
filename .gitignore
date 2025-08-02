@@ -208,3 +208,7 @@ __marimo__/
 
 # config file
 config/config.yaml
+
+# Temp file
+temp/
+data/

@@ -1,16 +1,21 @@
-"""Music commands for SimiluBot."""
+"""Odysseia-Similu 音乐命令模块"""
 
 import logging
 import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 import discord
 from discord.ext import commands
 
 from similubot.core.command_registry import CommandRegistry
-from similubot.music.music_player import MusicPlayer
 from similubot.progress.discord_updater import DiscordProgressUpdater
 from similubot.progress.music_progress import MusicProgressBar
 from similubot.utils.config_manager import ConfigManager
+
+# 为了兼容性，支持多种音乐播放器类型
+try:
+    from similubot.music.music_player import MusicPlayer
+except ImportError:
+    MusicPlayer = None
 
 
 class MusicCommands:
@@ -21,13 +26,13 @@ class MusicCommands:
     and voice channel interaction.
     """
 
-    def __init__(self, config: ConfigManager, music_player: MusicPlayer):
+    def __init__(self, config: ConfigManager, music_player: Any):
         """
-        Initialize music commands.
+        初始化音乐命令模块
 
         Args:
-            config: Configuration manager
-            music_player: Music player instance
+            config: 配置管理器
+            music_player: 音乐播放器实例（支持新旧架构）
         """
         self.logger = logging.getLogger("similubot.commands.music")
         self.config = config
