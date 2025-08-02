@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python3
 """
 Odysseia-Similu 音乐机器人 - 专为类脑/Odysseia Discord 社区打造的音乐播放机器人
