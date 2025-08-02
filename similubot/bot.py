@@ -84,6 +84,9 @@ class SimiluBot:
             config=self.config
         )
 
+        # 注册播放事件处理器
+        self._register_playback_events()
+
         # 创建兼容性适配器，确保现有命令正常工作
         self.music_player = MusicPlayerAdapter(self.playback_engine)
 
@@ -95,6 +98,20 @@ class SimiluBot:
         )
 
         self.logger.debug("核心模块初始化完成")
+
+    def _register_playback_events(self) -> None:
+        """注册播放事件处理器"""
+        from similubot.playback.playback_event import PlaybackEvent
+        
+        # 创建播放事件处理器实例
+        self.playback_event = PlaybackEvent()
+        
+        # 注册事件处理器
+        self.playback_engine.add_event_handler("show_song_info", self.playback_event.show_song_info)
+        self.playback_engine.add_event_handler("song_requester_absent_skip", self.playback_event.absent_skip)
+        self.playback_engine.add_event_handler("your_song_notification", self.playback_event.your_song_notification)
+        
+        self.logger.debug("播放事件处理器注册完成")
 
     def _init_command_modules(self) -> None:
         """初始化命令模块。"""
