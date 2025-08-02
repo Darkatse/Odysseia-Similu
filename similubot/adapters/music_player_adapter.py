@@ -84,12 +84,34 @@ class MusicPlayerAdapter:
             def __init__(self, provider_factory):
                 self.provider_factory = provider_factory
                 self.catbox_provider = provider_factory.get_provider_by_name('catbox')
-            
+
             async def extract_audio_info(self, url: str):
                 if self.catbox_provider:
                     return await self.catbox_provider.extract_audio_info(url)
                 return None
-        
+
+            def format_file_size(self, size_bytes: int) -> str:
+                """
+                格式化文件大小为可读字符串
+
+                Args:
+                    size_bytes: 文件大小（字节）
+
+                Returns:
+                    格式化的文件大小字符串
+                """
+                if size_bytes is None:
+                    return "Unknown size"
+
+                if size_bytes >= 1024 * 1024 * 1024:
+                    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+                elif size_bytes >= 1024 * 1024:
+                    return f"{size_bytes / (1024 * 1024):.1f} MB"
+                elif size_bytes >= 1024:
+                    return f"{size_bytes / 1024:.1f} KB"
+                else:
+                    return f"{size_bytes} B"
+
         return CatboxClientAdapter(self._playback_engine.audio_provider_factory)
     
     def is_supported_url(self, url: str) -> bool:

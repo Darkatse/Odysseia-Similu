@@ -221,12 +221,22 @@ class MusicCommands:
 
             # Add file size for Catbox files
             if hasattr(audio_info, 'file_size') and audio_info.file_size:
-                file_size_str = self.music_player.catbox_client.format_file_size(audio_info.file_size)
-                embed.add_field(
-                    name="文件大小",
-                    value=file_size_str,
-                    inline=True
-                )
+                try:
+                    file_size_str = self.music_player.catbox_client.format_file_size(audio_info.file_size)
+                    embed.add_field(
+                        name="文件大小",
+                        value=file_size_str,
+                        inline=True
+                    )
+                    self.logger.debug(f"成功格式化Catbox文件大小: {file_size_str}")
+                except Exception as e:
+                    self.logger.warning(f"格式化Catbox文件大小失败: {e}")
+                    # 提供备用的文件大小显示
+                    embed.add_field(
+                        name="文件大小",
+                        value=f"{audio_info.file_size} bytes",
+                        inline=True
+                    )
 
             embed.add_field(
                 name="队列位置",
