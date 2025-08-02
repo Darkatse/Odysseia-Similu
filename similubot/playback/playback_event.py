@@ -118,7 +118,13 @@ class PlaybackEvent:
             embed = discord.Embed(
                 title="📣 轮到你的歌了",
                 description=f"下首播放: {song.title}\n",
-                color=discord.Color.orange()
+                color=discord.Color.blue()
+            )
+
+            embed.add_field(
+                name="点歌人",
+                value=song.requester.mention,
+                inline=True
             )
 
             channel = bot.get_channel(channel_id)
