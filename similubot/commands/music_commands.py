@@ -67,26 +67,26 @@ class MusicCommands:
             return
 
         usage_examples = [
-            "!music <youtube_url> - Add YouTube song to queue and start playback",
-            "!music <catbox_audio_url> - Add Catbox audio file to queue and start playback",
-            "!music queue - Display current queue",
-            "!music now - Show current song progress",
-            "!music skip - Skip to next song",
-            "!music stop - Stop playback and clear queue",
-            "!music jump <number> - Jump to specific position in queue",
-            "!music seek <time> - Seek to position (e.g., 1:30, +30, -1:00)",
-            "!music status - Show queue persistence status"
+            "!music <youtube链接> - 添加YouTube歌曲到队列并开始播放",
+            "!music <catbox音频链接> - 添加Catbox音频文件到队列并开始播放",
+            "!music queue - 显示当前播放队列",
+            "!music now - 显示当前歌曲播放进度",
+            "!music skip - 跳过当前歌曲",
+            "!music stop - 停止播放并清空队列",
+            "!music jump <数字> - 跳转到队列指定位置",
+            "!music seek <时间> - 跳转到指定时间 (例如: 1:30, +30, -1:00)",
+            "!music status - 显示队列持久化状态"
         ]
 
         help_text = (
-            "Music playback commands for YouTube videos and Catbox audio files. "
-            "You must be in a voice channel to use these commands."
+            "YouTube视频和Catbox音频文件的音乐播放命令。"
+            "使用这些命令前您必须先加入语音频道。"
         )
 
         registry.register_command(
             name="music",
             callback=self.music_command,
-            description="Music playback and queue management",
+            description="音乐播放和队列管理",
             required_permission="music",
             usage_examples=usage_examples,
             help_text=help_text
@@ -138,7 +138,7 @@ class MusicCommands:
         """
         # Check if user is in voice channel
         if not ctx.author.voice or not ctx.author.voice.channel:
-            await ctx.reply("❌ You must be in a voice channel to play music!")
+            await ctx.reply("❌ 您必须先加入语音频道才能播放音乐！")
             return
 
         # Connect to voice channel if not already connected
@@ -175,7 +175,7 @@ class MusicCommands:
                 elif error and "歌曲时长" in error and "超过了最大限制" in error:
                     await self._send_song_too_long_embed(response, error)
                 else:
-                    await self._send_error_embed(response, "Failed to Add Song", error or "Unknown error")
+                    await self._send_error_embed(response, "添加歌曲失败", error or "未知错误")
                 return
 
             # Get audio info for the added song based on source type
@@ -186,17 +186,17 @@ class MusicCommands:
                 audio_info = await self.music_player.catbox_client.extract_audio_info(url)
 
             if not audio_info:
-                await self._send_error_embed(response, "Error", "Failed to get song information")
+                await self._send_error_embed(response, "错误", "获取歌曲信息失败")
                 return
 
             # Create success embed
             embed = discord.Embed(
-                title="🎵 Song Added to Queue",
+                title="🎵 歌曲已添加到队列",
                 color=discord.Color.green()
             )
 
             embed.add_field(
-                name="Title",
+                name="歌曲标题",
                 value=audio_info.title,
                 inline=False
             )
@@ -205,16 +205,16 @@ class MusicCommands:
             if hasattr(audio_info, 'duration') and audio_info.duration > 0:
                 duration_str = self.music_player.youtube_client.format_duration(audio_info.duration)
             else:
-                duration_str = "Unknown"
+                duration_str = "未知"
 
             embed.add_field(
-                name="Duration",
+                name="时长",
                 value=duration_str,
                 inline=True
             )
 
             embed.add_field(
-                name="Source",
+                name="来源",
                 value=audio_info.uploader,
                 inline=True
             )
@@ -223,19 +223,19 @@ class MusicCommands:
             if hasattr(audio_info, 'file_size') and audio_info.file_size:
                 file_size_str = self.music_player.catbox_client.format_file_size(audio_info.file_size)
                 embed.add_field(
-                    name="File Size",
+                    name="文件大小",
                     value=file_size_str,
                     inline=True
                 )
 
             embed.add_field(
-                name="Position in Queue",
+                name="队列位置",
                 value=f"#{position}",
                 inline=True
             )
 
             embed.add_field(
-                name="Requested by",
+                name="点歌人",
                 value=ctx.author.display_name,
                 inline=True
             )
@@ -243,7 +243,7 @@ class MusicCommands:
             # Add format info for Catbox files
             if hasattr(audio_info, 'file_format') and audio_info.file_format:
                 embed.add_field(
-                    name="Format",
+                    name="格式",
                     value=audio_info.file_format.upper(),
                     inline=True
                 )
@@ -255,7 +255,7 @@ class MusicCommands:
 
         except Exception as e:
             self.logger.error(f"Error in play command: {e}", exc_info=True)
-            await self._send_error_embed(response, "Unexpected Error", str(e))
+            await self._send_error_embed(response, "意外错误", str(e))
 
     async def _handle_queue_command(self, ctx: commands.Context) -> None:
         """
@@ -269,15 +269,15 @@ class MusicCommands:
 
             if queue_info["is_empty"] and not queue_info["current_song"]:
                 embed = discord.Embed(
-                    title="🎵 Music Queue",
-                    description="Queue is empty",
+                    title="🎵 音乐队列",
+                    description="队列为空",
                     color=discord.Color.blue()
                 )
                 await ctx.reply(embed=embed)
                 return
 
             embed = discord.Embed(
-                title="🎵 Music Queue",
+                title="🎵 音乐队列",
                 color=discord.Color.blue()
             )
 
@@ -285,10 +285,10 @@ class MusicCommands:
             if queue_info["current_song"]:
                 current = queue_info["current_song"]
                 embed.add_field(
-                    name="🎶 Now Playing",
+                    name="🎶 正在播放",
                     value=f"**{current.title}**\n"
-                          f"Duration: {self.music_player.youtube_client.format_duration(current.duration)}\n"
-                          f"Requested by: {current.requester.display_name}",
+                          f"时长: {self.music_player.youtube_client.format_duration(current.duration)}\n"
+                          f"点歌人: {current.requester.display_name}",
                     inline=False
                 )
 
@@ -302,12 +302,12 @@ class MusicCommands:
                     for song in queue_display:
                         queue_text += (
                             f"**{song['position']}.** {song['title']}\n"
-                            f"    Duration: {song['duration']} | "
-                            f"Requested by: {song['requester']}\n\n"
+                            f"    时长: {song['duration']} | "
+                            f"点歌人: {song['requester']}\n\n"
                         )
 
                     embed.add_field(
-                        name="📋 Up Next",
+                        name="📋 即将播放",
                         value=queue_text[:1024],  # Discord field limit
                         inline=False
                     )
@@ -317,19 +317,19 @@ class MusicCommands:
                     queue_info["total_duration"]
                 )
                 embed.add_field(
-                    name="📊 Queue Summary",
-                    value=f"Songs: {queue_info['queue_length']}\n"
-                          f"Total Duration: {total_duration}",
+                    name="📊 队列统计",
+                    value=f"歌曲数量: {queue_info['queue_length']}\n"
+                          f"总时长: {total_duration}",
                     inline=True
                 )
 
             # Add voice connection info
             if queue_info["connected"]:
                 embed.add_field(
-                    name="🔊 Voice Status",
-                    value=f"Channel: {queue_info['channel']}\n"
-                          f"Playing: {'Yes' if queue_info['playing'] else 'No'}\n"
-                          f"Paused: {'Yes' if queue_info['paused'] else 'No'}",
+                    name="🔊 语音状态",
+                    value=f"频道: {queue_info['channel']}\n"
+                          f"播放中: {'是' if queue_info['playing'] else '否'}\n"
+                          f"已暂停: {'是' if queue_info['paused'] else '否'}",
                     inline=True
                 )
 
@@ -337,7 +337,7 @@ class MusicCommands:
 
         except Exception as e:
             self.logger.error(f"Error in queue command: {e}", exc_info=True)
-            await ctx.reply("❌ Error retrieving queue information")
+            await ctx.reply("❌ 获取队列信息时出错")
 
     async def _handle_now_command(self, ctx: commands.Context) -> None:
         """
@@ -356,7 +356,7 @@ class MusicCommands:
             current_song = queue_info.get("current_song")
 
             if not current_song:
-                await ctx.reply("❌ No song is currently playing")
+                await ctx.reply("❌ 当前没有歌曲在播放")
                 return
 
             # Send initial response
@@ -368,30 +368,30 @@ class MusicCommands:
             if not success:
                 # Fallback to static display
                 embed = discord.Embed(
-                    title="🎶 Now Playing",
+                    title="🎶 正在播放",
                     color=discord.Color.green()
                 )
 
                 embed.add_field(
-                    name="Title",
+                    name="歌曲标题",
                     value=current_song.title,
                     inline=False
                 )
 
                 embed.add_field(
-                    name="Duration",
+                    name="时长",
                     value=self.music_player.youtube_client.format_duration(current_song.duration),
                     inline=True
                 )
 
                 embed.add_field(
-                    name="Uploader",
+                    name="上传者",
                     value=current_song.uploader,
                     inline=True
                 )
 
                 embed.add_field(
-                    name="Requested by",
+                    name="点歌人",
                     value=current_song.requester.display_name,
                     inline=True
                 )
@@ -399,14 +399,14 @@ class MusicCommands:
                 # Add static status
                 if queue_info["playing"]:
                     embed.add_field(
-                        name="Status",
-                        value="▶️ Playing",
+                        name="状态",
+                        value="▶️ 播放中",
                         inline=True
                     )
                 elif queue_info["paused"]:
                     embed.add_field(
-                        name="Status",
-                        value="⏸️ Paused",
+                        name="状态",
+                        value="⏸️ 已暂停",
                         inline=True
                     )
 
@@ -417,7 +417,7 @@ class MusicCommands:
 
         except Exception as e:
             self.logger.error(f"Error in now command: {e}", exc_info=True)
-            await ctx.reply("❌ Error retrieving current song information")
+            await ctx.reply("❌ 获取当前歌曲信息时出错")
 
     async def _handle_skip_command(self, ctx: commands.Context) -> None:
         """
@@ -429,7 +429,7 @@ class MusicCommands:
         try:
             # Check if guild exists
             if not ctx.guild:
-                await ctx.reply("❌ This command can only be used in a server")
+                await ctx.reply("❌ 此命令只能在服务器中使用")
                 return
 
             # Stop any active progress bars
@@ -442,8 +442,8 @@ class MusicCommands:
                 return
 
             embed = discord.Embed(
-                title="⏭️ Song Skipped",
-                description=f"Skipped: **{skipped_title}**",
+                title="⏭️ 歌曲已跳过",
+                description=f"已跳过: **{skipped_title}**",
                 color=discord.Color.orange()
             )
 
@@ -451,7 +451,7 @@ class MusicCommands:
 
         except Exception as e:
             self.logger.error(f"Error in skip command: {e}", exc_info=True)
-            await ctx.reply("❌ Error skipping song")
+            await ctx.reply("❌ 跳过歌曲时出错")
 
     async def _handle_stop_command(self, ctx: commands.Context) -> None:
         """
@@ -463,7 +463,7 @@ class MusicCommands:
         try:
             # Check if guild exists
             if not ctx.guild:
-                await ctx.reply("❌ This command can only be used in a server")
+                await ctx.reply("❌ 此命令只能在服务器中使用")
                 return
 
             # Stop any active progress bars
@@ -476,8 +476,8 @@ class MusicCommands:
                 return
 
             embed = discord.Embed(
-                title="⏹️ Playback Stopped",
-                description="Stopped playback and cleared queue. Disconnected from voice channel.",
+                title="⏹️ 播放已停止",
+                description="已停止播放并清空队列，已断开语音频道连接。",
                 color=discord.Color.red()
             )
 
@@ -485,7 +485,7 @@ class MusicCommands:
 
         except Exception as e:
             self.logger.error(f"Error in stop command: {e}", exc_info=True)
-            await ctx.reply("❌ Error stopping playback")
+            await ctx.reply("❌ 停止播放时出错")
 
     async def _handle_jump_command(self, ctx: commands.Context, args: List[str]) -> None:
         """
@@ -502,12 +502,12 @@ class MusicCommands:
         try:
             # Check if guild exists
             if not ctx.guild:
-                await ctx.reply("❌ This command can only be used in a server")
+                await ctx.reply("❌ 此命令只能在服务器中使用")
                 return
 
             position = int(args[0])
             if position < 1:
-                await ctx.reply("❌ Queue position must be 1 or greater")
+                await ctx.reply("❌ 队列位置必须大于等于1")
                 return
 
             # Stop any active progress bars
@@ -522,18 +522,18 @@ class MusicCommands:
                 return
 
             embed = discord.Embed(
-                title="⏭️ Jumped to Song",
-                description=f"Now playing: **{song_title}**",
+                title="⏭️ 已跳转到歌曲",
+                description=f"正在播放: **{song_title}**",
                 color=discord.Color.green()
             )
 
             await ctx.reply(embed=embed)
 
         except ValueError:
-            await ctx.reply("❌ Invalid position number")
+            await ctx.reply("❌ 无效的位置数字")
         except Exception as e:
             self.logger.error(f"Error in jump command: {e}", exc_info=True)
-            await ctx.reply("❌ Error jumping to position")
+            await ctx.reply("❌ 跳转到指定位置时出错")
 
     async def _handle_seek_command(self, ctx: commands.Context, args: List[str]) -> None:
         """
@@ -546,8 +546,8 @@ class MusicCommands:
         if not args:
             # Show seek command help
             embed = discord.Embed(
-                title="🎯 Seek Command Help",
-                description="Seek to a specific position in the currently playing song",
+                title="🎯 定位命令帮助",
+                description="跳转到当前播放歌曲的指定位置",
                 color=discord.Color.blue()
             )
 
@@ -555,19 +555,19 @@ class MusicCommands:
             examples_text = "\n".join(examples)
 
             embed.add_field(
-                name="Examples",
+                name="使用示例",
                 value=examples_text,
                 inline=False
             )
 
             embed.add_field(
-                name="Supported Formats",
-                value="• `mm:ss` - Jump to absolute position\n"
-                      "• `hh:mm:ss` - Jump to absolute position with hours\n"
-                      "• `+mm:ss` - Seek forward relative to current position\n"
-                      "• `-mm:ss` - Seek backward relative to current position\n"
-                      "• `+seconds` - Seek forward by seconds\n"
-                      "• `-seconds` - Seek backward by seconds",
+                name="支持的格式",
+                value="• `mm:ss` - 跳转到绝对位置\n"
+                      "• `hh:mm:ss` - 跳转到绝对位置（包含小时）\n"
+                      "• `+mm:ss` - 相对当前位置向前跳转\n"
+                      "• `-mm:ss` - 相对当前位置向后跳转\n"
+                      "• `+秒数` - 向前跳转指定秒数\n"
+                      "• `-秒数` - 向后跳转指定秒数",
                 inline=False
             )
 
@@ -577,7 +577,7 @@ class MusicCommands:
         try:
             # Check if guild exists
             if not ctx.guild:
-                await ctx.reply("❌ This command can only be used in a server")
+                await ctx.reply("❌ 此命令只能在服务器中使用")
                 return
 
             time_str = args[0]
@@ -596,18 +596,18 @@ class MusicCommands:
 
                 if is_relative:
                     # For relative seeks, show the direction
-                    direction = "forward" if seek_result.target_position >= 0 else "backward"
+                    direction = "向前" if seek_result.target_position >= 0 else "向后"
                     formatted_time = self.music_player.seek_manager.format_time(abs(seek_result.target_position))
-                    description = f"Sought {direction} by {formatted_time}"
+                    description = f"已{direction}跳转 {formatted_time}"
                 else:
                     # For absolute seeks, show the target position
                     formatted_time = self.music_player.seek_manager.format_time(seek_result.target_position)
-                    description = f"Sought to {formatted_time}"
+                    description = f"已跳转到 {formatted_time}"
             else:
-                description = f"Sought to position: {time_str}"
+                description = f"已跳转到位置: {time_str}"
 
             embed = discord.Embed(
-                title="🎯 Seek Completed",
+                title="🎯 定位完成",
                 description=description,
                 color=discord.Color.green()
             )
@@ -616,41 +616,41 @@ class MusicCommands:
 
         except Exception as e:
             self.logger.error(f"Error in seek command: {e}", exc_info=True)
-            await ctx.reply("❌ Error seeking to position")
+            await ctx.reply("❌ 跳转到指定位置时出错")
 
     async def _show_music_help(self, ctx: commands.Context) -> None:
         """
-        Show music command help.
+        显示音乐命令帮助。
 
         Args:
-            ctx: Discord command context
+            ctx: Discord 命令上下文
         """
         embed = discord.Embed(
-            title="🎵 Music Commands",
-            description="Music playback and queue management commands",
+            title="🎵 音乐命令",
+            description="音乐播放和队列管理命令",
             color=discord.Color.blue()
         )
 
         commands_text = (
-            "`!music <youtube_url>` - Add YouTube song to queue\n"
-            "`!music <catbox_audio_url>` - Add Catbox audio file to queue\n"
-            "`!music queue` - Show current queue\n"
-            "`!music now` - Show current song\n"
-            "`!music skip` - Skip current song\n"
-            "`!music stop` - Stop and clear queue\n"
-            "`!music jump <number>` - Jump to position\n"
-            "`!music seek <time>` - Seek to position (e.g., 1:30, +30, -1:00)"
+            "`!music <youtube链接>` - 添加YouTube歌曲到队列\n"
+            "`!music <catbox音频链接>` - 添加Catbox音频文件到队列\n"
+            "`!music queue` - 显示当前队列\n"
+            "`!music now` - 显示当前歌曲\n"
+            "`!music skip` - 跳过当前歌曲\n"
+            "`!music stop` - 停止播放并清空队列\n"
+            "`!music jump <数字>` - 跳转到指定位置\n"
+            "`!music seek <时间>` - 跳转到指定时间 (例如: 1:30, +30, -1:00)"
         )
 
         embed.add_field(
-            name="Available Commands",
+            name="可用命令",
             value=commands_text,
             inline=False
         )
 
         embed.add_field(
-            name="Requirements",
-            value="• You must be in a voice channel\n• Provide valid YouTube or Catbox audio URLs\n• Supported formats: MP3, WAV, OGG, M4A, FLAC, AAC, OPUS, WMA",
+            name="使用要求",
+            value="• 您必须先加入语音频道\n• 提供有效的YouTube或Catbox音频链接\n• 支持格式: MP3, WAV, OGG, M4A, FLAC, AAC, OPUS, WMA",
             inline=False
         )
 

@@ -120,11 +120,11 @@ class DiscordProgressUpdater:
 
         # Set title based on operation and status
         if progress.status == ProgressStatus.COMPLETED:
-            embed.title = f"✅ {progress.operation} Complete"
+            embed.title = f"✅ {progress.operation} 完成"
         elif progress.status == ProgressStatus.FAILED:
-            embed.title = f"❌ {progress.operation} Failed"
+            embed.title = f"❌ {progress.operation} 失败"
         elif progress.status == ProgressStatus.CANCELLED:
-            embed.title = f"⏹️ {progress.operation} Cancelled"
+            embed.title = f"⏹️ {progress.operation} 已取消"
         else:
             embed.title = f"⏳ {progress.operation}"
 
@@ -132,7 +132,7 @@ class DiscordProgressUpdater:
         if progress.status == ProgressStatus.IN_PROGRESS and progress.percentage > 0:
             progress_bar = self._create_progress_bar(progress.percentage)
             embed.add_field(
-                name="Progress",
+                name="进度",
                 value=f"{progress_bar} {progress.percentage:.1f}%",
                 inline=False
             )
@@ -149,7 +149,7 @@ class DiscordProgressUpdater:
             current_str = self._format_size(progress.current_size)
             total_str = self._format_size(progress.total_size)
             embed.add_field(
-                name="Size",
+                name="大小",
                 value=f"{current_str} / {total_str}",
                 inline=True
             )
@@ -164,7 +164,7 @@ class DiscordProgressUpdater:
                 # For downloads/uploads, speed is bytes/second
                 speed_str = self._format_speed(progress.speed)
             embed.add_field(
-                name="Speed",
+                name="速度",
                 value=speed_str,
                 inline=True
             )
@@ -174,7 +174,7 @@ class DiscordProgressUpdater:
         if progress.eta is not None and progress.eta > 0:
             eta_str = self._format_time(progress.eta)
             embed.add_field(
-                name="ETA",
+                name="预计完成时间",
                 value=eta_str,
                 inline=True
             )

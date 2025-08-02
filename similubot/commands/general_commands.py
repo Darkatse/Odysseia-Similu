@@ -37,28 +37,28 @@ class GeneralCommands:
         registry.register_command(
             name="about",
             callback=self.about_command,
-            description="Show information about the bot",
+            description="显示机器人信息",
             required_permission="about"
         )
 
         registry.register_command(
             name="help",
             callback=self.help_command,
-            description="Show help information",
+            description="显示帮助信息",
             required_permission="help"
         )
 
         registry.register_command(
             name="status",
             callback=self.status_command,
-            description="Show bot status information",
+            description="显示机器人状态信息",
             required_permission="status"
         )
 
         registry.register_command(
             name="ping",
             callback=self.ping_command,
-            description="Check bot latency and connection quality",
+            description="检查机器人延迟和连接质量",
             required_permission="ping"
         )
 
@@ -146,28 +146,28 @@ class GeneralCommands:
             command = ctx.bot.get_command(command_name)
             if command:
                 embed = discord.Embed(
-                    title=f"Help: {ctx.bot.command_prefix}{command.name}",
-                    description=command.help or "No description available.",
+                    title=f"帮助: {ctx.bot.command_prefix}{command.name}",
+                    description=command.help or "暂无描述。",
                     color=0x3498db
                 )
 
                 if command.usage:
                     embed.add_field(
-                        name="Usage",
+                        name="用法",
                         value=f"`{ctx.bot.command_prefix}{command.name} {command.usage}`",
                         inline=False
                     )
 
                 if command.aliases:
                     embed.add_field(
-                        name="Aliases",
+                        name="别名",
                         value=", ".join([f"`{alias}`" for alias in command.aliases]),
                         inline=False
                     )
 
                 await ctx.send(embed=embed)
             else:
-                await ctx.reply(f"❌ Command `{command_name}` not found.")
+                await ctx.reply(f"❌ 未找到命令 `{command_name}`。")
         else:
             # 显示通用帮助
             embed = discord.Embed(
@@ -334,20 +334,20 @@ class GeneralCommands:
             # Create embed with results
             embed = discord.Embed(
                 title=f"🏓 Pong! {overall_indicator['emoji']}",
-                description=f"Connection Quality: **{overall_indicator['text']}**",
+                description=f"连接质量: **{overall_indicator['text']}**",
                 color=overall_indicator["color"]
             )
 
             # API Latency field
             embed.add_field(
-                name=f"{api_quality['emoji']} Discord API Latency",
+                name=f"{api_quality['emoji']} Discord API 延迟",
                 value=f"**{api_latency_ms}ms**\n{api_quality['description']}",
                 inline=True
             )
 
             # WebSocket Latency field
             embed.add_field(
-                name=f"{ws_quality['emoji']} WebSocket Latency",
+                name=f"{ws_quality['emoji']} WebSocket 延迟",
                 value=f"**{websocket_latency_ms}ms**\n{ws_quality['description']}",
                 inline=True
             )
@@ -357,11 +357,11 @@ class GeneralCommands:
 
             # Additional info
             embed.add_field(
-                name="📊 Connection Details",
+                name="📊 连接详情",
                 value=(
-                    f"**Shard:** {ctx.guild.shard_id if ctx.guild else 'N/A'}\n"
-                    f"**Gateway:** {ctx.bot.user.id % 1000}\n"
-                    f"**Timestamp:** <t:{int(time.time())}:T>"
+                    f"**分片:** {ctx.guild.shard_id if ctx.guild else 'N/A'}\n"
+                    f"**网关:** {ctx.bot.user.id % 1000}\n"
+                    f"**时间戳:** <t:{int(time.time())}:T>"
                 ),
                 inline=False
             )
@@ -374,17 +374,17 @@ class GeneralCommands:
         except discord.HTTPException as e:
             self.logger.warning(f"Discord API error during ping command: {e}")
             error_embed = discord.Embed(
-                title="❌ Network Error",
-                description="Failed to measure API latency due to Discord API issues.",
+                title="❌ 网络错误",
+                description="由于Discord API问题，无法测量API延迟。",
                 color=discord.Color.red()
             )
             error_embed.add_field(
-                name="WebSocket Latency",
+                name="WebSocket延迟",
                 value=f"{round(ctx.bot.latency * 1000, 2)}ms",
                 inline=True
             )
             error_embed.add_field(
-                name="Error Details",
+                name="错误详情",
                 value=f"HTTP {e.status}: {e.text}",
                 inline=False
             )
@@ -393,12 +393,12 @@ class GeneralCommands:
         except Exception as e:
             self.logger.error(f"Unexpected error in ping command: {e}", exc_info=True)
             error_embed = discord.Embed(
-                title="❌ Ping Failed",
-                description="An unexpected error occurred while measuring latency.",
+                title="❌ 延迟测试失败",
+                description="测量延迟时发生意外错误。",
                 color=discord.Color.red()
             )
             error_embed.add_field(
-                name="Error",
+                name="错误",
                 value=str(e)[:1024],  # Limit error message length
                 inline=False
             )
@@ -417,37 +417,37 @@ class GeneralCommands:
         if latency_ms < 0:
             return {
                 "emoji": "⚠️",
-                "description": "Invalid measurement",
+                "description": "无效测量",
                 "level": 0
             }
         elif latency_ms <= 50:
             return {
                 "emoji": "🟢",
-                "description": "Excellent",
+                "description": "优秀",
                 "level": 4
             }
         elif latency_ms <= 100:
             return {
                 "emoji": "🟡",
-                "description": "Good",
+                "description": "良好",
                 "level": 3
             }
         elif latency_ms <= 200:
             return {
                 "emoji": "🟠",
-                "description": "Fair",
+                "description": "一般",
                 "level": 2
             }
         elif latency_ms <= 500:
             return {
                 "emoji": "🔴",
-                "description": "Poor",
+                "description": "较差",
                 "level": 1
             }
         else:
             return {
                 "emoji": "🔴",
-                "description": "Very Poor",
+                "description": "很差",
                 "level": 0
             }
 
@@ -464,31 +464,31 @@ class GeneralCommands:
         if quality_level >= 4:
             return {
                 "emoji": "🟢",
-                "text": "Excellent",
+                "text": "优秀",
                 "color": discord.Color.green()
             }
         elif quality_level >= 3:
             return {
                 "emoji": "🟡",
-                "text": "Good",
+                "text": "良好",
                 "color": discord.Color.gold()
             }
         elif quality_level >= 2:
             return {
                 "emoji": "🟠",
-                "text": "Fair",
+                "text": "一般",
                 "color": discord.Color.orange()
             }
         elif quality_level >= 1:
             return {
                 "emoji": "🔴",
-                "text": "Poor",
+                "text": "较差",
                 "color": discord.Color.red()
             }
         else:
             return {
                 "emoji": "⚠️",
-                "text": "Critical",
+                "text": "严重",
                 "color": discord.Color.dark_red()
             }
 

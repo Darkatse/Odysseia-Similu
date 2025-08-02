@@ -68,7 +68,7 @@ class MusicProgressTracker(ProgressTracker):
             operation=self.operation_name,
             status=ProgressStatus.IN_PROGRESS,
             percentage=0.0,
-            message="Music playback started",
+            message="音乐播放已开始",
             details={
                 "song_duration": song_duration,
                 "current_position": 0.0,
@@ -89,7 +89,7 @@ class MusicProgressTracker(ProgressTracker):
                 operation=self.operation_name,
                 status=ProgressStatus.IN_PROGRESS,
                 percentage=percentage,
-                message="Music playback paused",
+                message="音乐播放已暂停",
                 details={
                     "song_duration": self._song_duration,
                     "current_position": current_position,
@@ -112,7 +112,7 @@ class MusicProgressTracker(ProgressTracker):
                 operation=self.operation_name,
                 status=ProgressStatus.IN_PROGRESS,
                 percentage=percentage,
-                message="Music playback resumed",
+                message="音乐播放已恢复",
                 details={
                     "song_duration": self._song_duration,
                     "current_position": current_position,
@@ -136,7 +136,7 @@ class MusicProgressTracker(ProgressTracker):
             operation=self.operation_name,
             status=ProgressStatus.IN_PROGRESS,
             percentage=percentage,
-            message=f"Playing: {self.format_time(current_position)}/{self.format_time(self._song_duration)}",
+            message=f"播放中: {self.format_time(current_position)}/{self.format_time(self._song_duration)}",
             details={
                 "song_duration": self._song_duration,
                 "current_position": current_position,
@@ -152,7 +152,7 @@ class MusicProgressTracker(ProgressTracker):
                 operation=self.operation_name,
                 status=ProgressStatus.COMPLETED,
                 percentage=100.0,
-                message="Music playback completed",
+                message="音乐播放已完成",
                 details={
                     "song_duration": self._song_duration,
                     "current_position": self._song_duration or 0.0,
@@ -227,7 +227,7 @@ class MusicProgressTracker(ProgressTracker):
             operation=self.operation_name,
             status=ProgressStatus.IN_PROGRESS,
             percentage=percentage,
-            message=f"Sought to: {self.format_time(target_seconds)}/{self.format_time(self._song_duration)}",
+            message=f"已跳转到: {self.format_time(target_seconds)}/{self.format_time(self._song_duration)}",
             details={
                 "song_duration": self._song_duration,
                 "current_position": target_seconds,
@@ -416,13 +416,13 @@ class MusicProgressUpdater:
 
             # Create embed
             embed = discord.Embed(
-                title="🎵 Now Playing",
+                title="🎵 正在播放",
                 color=discord.Color.green()
             )
 
             # Song title and artist
             embed.add_field(
-                name="Track",
+                name="歌曲",
                 value=f"**{song.title}**",
                 inline=False
             )
@@ -430,7 +430,7 @@ class MusicProgressUpdater:
             # Progress bar with time
             progress_text = f"{status_icon} {progress_bar} [{current_time}/{total_time}] 🔊"
             embed.add_field(
-                name="Progress",
+                name="进度",
                 value=progress_text,
                 inline=False
             )
@@ -440,20 +440,20 @@ class MusicProgressUpdater:
                 lyric_text = self._get_current_lyric_display(lyrics, current_position, guild_id)
                 if lyric_text:
                     embed.add_field(
-                        name="🎤 Lyrics",
+                        name="🎤 歌词",
                         value=lyric_text,
                         inline=False
                     )
 
             # Additional info
             embed.add_field(
-                name="Artist",
+                name="艺术家",
                 value=song.uploader,
                 inline=True
             )
 
             embed.add_field(
-                name="Requested by",
+                name="点歌人",
                 value=song.requester.display_name,
                 inline=True
             )
@@ -532,9 +532,9 @@ class MusicProgressUpdater:
                 # Show upcoming lyric if no current lyrics
                 upcoming_line = next_lines[0]
                 formatted_text = self.lyrics_manager.format_lyric_display(upcoming_line)
-                display_parts.append(f"*Coming up:*\n{formatted_text}")
+                display_parts.append(f"*即将播放:*\n{formatted_text}")
             else:
-                return "*No lyrics available at this time*"
+                return "*此时暂无歌词*"
 
             # Show next line as preview if available and we have current lyrics
             if current_lyrics and next_lines:
@@ -553,11 +553,11 @@ class MusicProgressUpdater:
                     result = result[:197] + "..."
                 return result
             else:
-                return "*♪ Instrumental ♪*"
+                return "*♪ 纯音乐 ♪*"
 
         except Exception as e:
             self.logger.error(f"Error formatting lyric display: {e}", exc_info=True)
-            return "*Error displaying lyrics*"
+            return "*歌词显示错误*"
 
     async def start_progress_updates(
         self,
