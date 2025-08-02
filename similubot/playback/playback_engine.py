@@ -147,34 +147,77 @@ class PlaybackEngine(IPlaybackEngine):
     async def skip_song(self, guild_id: int) -> Tuple[bool, Optional[SongInfo], Optional[str]]:
         """
         跳过当前歌曲
-        
+
         Args:
             guild_id: 服务器ID
-            
+
         Returns:
-            (成功标志, 下一首歌曲, 错误消息)
+            (成功标志, 当前歌曲信息, 错误消息)
         """
         try:
             queue_manager = self.get_queue_manager(guild_id)
-            
-            # 停止当前播放
+
+            # 获取当前歌曲信息用于返回
+            current_song = queue_manager.get_current_song()
+
+            if not current_song:
+                return False, None, "当前没有歌曲在播放"
+
+            # 停止当前播放 - 这会触发 after_playing 回调，playback loop 会自然地继续到下一首歌
+            self.logger.debug(f"停止当前播放 - 服务器 {guild_id}")
             self.voice_manager.stop_audio(guild_id)
-            
-            # 获取下一首歌曲
-            next_song = await queue_manager.skip_current_song()
-            
-            if next_song:
-                self.logger.info(f"跳过歌曲 - 服务器 {guild_id}: 下一首 {next_song.title}")
-            else:
-                self.logger.info(f"跳过歌曲 - 服务器 {guild_id}: 队列为空")
-            
-            return True, next_song, None
-            
+
+            # 清理当前音频文件
+            self.logger.debug(f"清理当前音频文件 - 服务器 {guild_id}")
+            await self._cleanup_current_audio(guild_id)
+
+            self.logger.info(f"跳过歌曲 - 服务器 {guild_id}: {current_song.title}")
+
+            return True, current_song, None
+
         except Exception as e:
             error_msg = f"跳过歌曲失败: {e}"
             self.logger.error(error_msg)
             return False, None, error_msg
-    
+
+    async def jump_to_position(self, guild_id: int, position: int) -> Tuple[bool, Optional[SongInfo], Optional[str]]:
+        """
+        跳转到队列中的指定位置
+
+        Args:
+            guild_id: 服务器ID
+            position: 队列位置（从1开始）
+
+        Returns:
+            (成功标志, 目标歌曲信息, 错误消息)
+        """
+        try:
+            queue_manager = self.get_queue_manager(guild_id)
+
+            # 停止当前播放 - 这会触发 after_playing 回调
+            self.logger.debug(f"停止当前播放以跳转 - 服务器 {guild_id}")
+            self.voice_manager.stop_audio(guild_id)
+
+            # 清理当前音频文件
+            self.logger.debug(f"清理当前音频文件以跳转 - 服务器 {guild_id}")
+            await self._cleanup_current_audio(guild_id)
+
+            # 跳转到指定位置
+            self.logger.debug(f"跳转到队列位置 {position} - 服务器 {guild_id}")
+            target_song = await queue_manager.jump_to_position(position)
+
+            if not target_song:
+                return False, None, f"无效的队列位置: {position}"
+
+            self.logger.info(f"跳转到位置 {position} - 服务器 {guild_id}: {target_song.title}")
+
+            return True, target_song, None
+
+        except Exception as e:
+            error_msg = f"跳转到位置失败: {e}"
+            self.logger.error(error_msg)
+            return False, None, error_msg
+
     async def stop_playback(self, guild_id: int) -> Tuple[bool, Optional[str]]:
         """
         停止播放并清空队列

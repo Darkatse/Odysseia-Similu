@@ -206,26 +206,20 @@ class MusicPlayerAdapter:
     async def skip_current_song(self, guild_id: int) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         跳过当前歌曲
-        
+
         Args:
             guild_id: 服务器ID
-            
+
         Returns:
             (成功标志, 跳过的歌曲标题, 错误消息)
         """
-        success, next_song, error = await self._playback_engine.skip_song(guild_id)
-        
-        # 获取当前歌曲标题用于显示
+        success, skipped_song, error = await self._playback_engine.skip_song(guild_id)
+
+        # 获取跳过的歌曲标题用于显示
         skipped_title = "Unknown Song"
-        if success:
-            try:
-                queue_manager = self._playback_engine.get_queue_manager(guild_id)
-                current_song = queue_manager.get_current_song()
-                if current_song:
-                    skipped_title = current_song.title
-            except:
-                pass
-        
+        if success and skipped_song:
+            skipped_title = skipped_song.title
+
         return success, skipped_title, error
     
     async def stop_playback(self, guild_id: int) -> Tuple[bool, Optional[str]]:
@@ -243,27 +237,22 @@ class MusicPlayerAdapter:
     async def jump_to_position(self, guild_id: int, position: int) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         跳转到队列中的指定位置
-        
+
         Args:
             guild_id: 服务器ID
             position: 队列位置
-            
+
         Returns:
             (成功标志, 歌曲标题, 错误消息)
         """
-        try:
-            queue_manager = self._playback_engine.get_queue_manager(guild_id)
-            song = await queue_manager.jump_to_position(position)
-            
-            if song:
-                return True, song.title, None
-            else:
-                return False, None, f"Invalid queue position: {position}"
-                
-        except Exception as e:
-            error_msg = f"跳转到位置失败: {e}"
-            self.logger.error(error_msg)
-            return False, None, error_msg
+        success, target_song, error = await self._playback_engine.jump_to_position(guild_id, position)
+
+        # 获取目标歌曲标题用于显示
+        song_title = "Unknown Song"
+        if success and target_song:
+            song_title = target_song.title
+
+        return success, song_title, error
     
     async def seek_to_position(self, guild_id: int, time_str: str) -> Tuple[bool, Optional[str]]:
         """
