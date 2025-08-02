@@ -121,11 +121,12 @@ class PlaybackEngine(IPlaybackEngine):
             try:
                 position = await queue_manager.add_song(audio_info, requester)
             except Exception as e:
-                # 检查是否是队列相关错误（重复歌曲或队列公平性）
+                # 检查是否是队列相关错误（重复歌曲、队列公平性或歌曲过长）
                 error_msg = str(e)
                 if ("已经请求了这首歌曲" in error_msg or
                     "已经有" in error_msg and "首歌曲在队列中" in error_msg or
-                    "正在播放中" in error_msg):
+                    "正在播放中" in error_msg or
+                    "歌曲时长" in error_msg and "超过了最大限制" in error_msg):
                     return False, None, error_msg
                 else:
                     raise  # 重新抛出其他异常

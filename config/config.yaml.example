@@ -13,7 +13,7 @@ download:
 music:
   enabled: true  # 设置为 false 可禁用音乐功能
   max_queue_size: 100  # 每个服务器队列中的最大歌曲数量
-  max_song_duration: 3600  # 最大歌曲时长（秒），此处为1小时
+  max_song_duration: 600  # 最大歌曲时长（秒），此处为10分钟
   auto_disconnect_timeout: 300  # 无活动后自动断开连接的时间（秒），此处为5分钟
   volume: 0.5  # 默认播放音量（0.0-1.0）
   ffmpeg_options:

@@ -172,6 +172,8 @@ class MusicCommands:
                     await self._send_queue_fairness_embed(response, error)
                 elif error and "正在播放中" in error:
                     await self._send_currently_playing_embed(response, error)
+                elif error and "歌曲时长" in error and "超过了最大限制" in error:
+                    await self._send_song_too_long_embed(response, error)
                 else:
                     await self._send_error_embed(response, "Failed to Add Song", error or "Unknown error")
                 return
@@ -756,6 +758,36 @@ class MusicCommands:
         embed.add_field(
             name="⏭️ 下一步",
             value="歌曲播放完成后，您就可以添加新的歌曲了。",
+            inline=False
+        )
+        await message.edit(content=None, embed=embed)
+
+    async def _send_song_too_long_embed(self, message: discord.Message, error_message: str) -> None:
+        """
+        Send song too long error embed message.
+
+        Args:
+            message: Message to edit
+            error_message: Song too long error message
+        """
+        embed = discord.Embed(
+            title="⏱️ 歌曲时长超限",
+            description=error_message,
+            color=discord.Color.red()
+        )
+        embed.add_field(
+            name="📏 时长限制说明",
+            value="为了确保队列的流畅性和公平性，系统限制了单首歌曲的最大时长。",
+            inline=False
+        )
+        embed.add_field(
+            name="💡 建议",
+            value="请尝试寻找该歌曲的较短版本，或选择其他歌曲。",
+            inline=False
+        )
+        embed.add_field(
+            name="🎵 替代方案",
+            value="• 寻找歌曲的单曲版本而非专辑版本\n• 选择官方版本而非扩展混音版本\n• 考虑添加歌曲的精华片段",
             inline=False
         )
         await message.edit(content=None, embed=embed)

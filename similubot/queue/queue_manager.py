@@ -40,6 +40,20 @@ class QueueFairnessError(Exception):
         self.pending_count = pending_count
 
 
+class SongTooLongError(Exception):
+    """
+    歌曲过长异常
+
+    当用户尝试添加超过最大时长限制的歌曲时抛出。
+    """
+    def __init__(self, message: str, song_title: str, user_name: str, actual_duration: int, max_duration: int):
+        super().__init__(message)
+        self.song_title = song_title
+        self.user_name = user_name
+        self.actual_duration = actual_duration
+        self.max_duration = max_duration
+
+
 class QueueManager(IQueueManager):
     """
     队列管理器实现
@@ -76,6 +90,50 @@ class QueueManager(IQueueManager):
         self._duplicate_detector = DuplicateDetector(guild_id, config_manager)
 
         self.logger.debug(f"队列管理器初始化完成 - 服务器 {guild_id}")
+
+    def _get_max_song_duration(self) -> int:
+        """
+        获取最大歌曲时长配置（秒）
+
+        Returns:
+            最大歌曲时长（秒），默认为600秒（10分钟）
+        """
+        if self._config_manager is None:
+            return 600  # 默认10分钟
+
+        try:
+            # 配置以秒为单位
+            max_duration = self._config_manager.get('music.max_song_duration', 600)
+
+            # 验证配置值
+            if not isinstance(max_duration, (int, float)) or max_duration <= 0:
+                self.logger.warning(f"无效的最大歌曲时长配置: {max_duration}，使用默认值600秒")
+                return 600
+
+            return int(max_duration)
+        except Exception as e:
+            self.logger.warning(f"获取最大歌曲时长配置失败: {e}，使用默认值600秒")
+            return 600
+
+    def _format_duration_string(self, seconds: int) -> str:
+        """
+        格式化时长为可读字符串
+
+        Args:
+            seconds: 时长（秒）
+
+        Returns:
+            格式化的时长字符串 (例: "3:45" 或 "1:23:45")
+        """
+        if seconds < 3600:  # 小于1小时
+            minutes = seconds // 60
+            secs = seconds % 60
+            return f"{minutes}:{secs:02d}"
+        else:  # 1小时或以上
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            secs = seconds % 60
+            return f"{hours}:{minutes:02d}:{secs:02d}"
 
     def _remove_song_from_tracking(self, song: 'Song') -> None:
         """
@@ -142,10 +200,26 @@ class QueueManager(IQueueManager):
             DuplicateSongError: 当用户尝试添加重复歌曲时
         """
         async with self._lock:
+            # 检查1: 歌曲时长限制（优先检查，即使其他限制被绕过也要检查）
+            max_duration = self._get_max_song_duration()
+            if audio_info.duration > max_duration:
+                error_msg = (
+                    f"歌曲时长 {self._format_duration_string(audio_info.duration)} "
+                    f"超过了最大限制 {self._format_duration_string(max_duration)}。"
+                )
+                self.logger.info(
+                    f"阻止过长歌曲添加 - 用户 {requester.display_name} ({requester.id}): "
+                    f"{audio_info.title} - 时长: {audio_info.duration}s, 限制: {max_duration}s"
+                )
+                raise SongTooLongError(
+                    error_msg, audio_info.title, requester.display_name,
+                    audio_info.duration, max_duration
+                )
+
             # 计算当前队列长度（包括正在播放的歌曲）
             current_queue_length = len(self._queue) + (1 if self._current_song else 0)
 
-            # 综合检查：重复检测 + 队列公平性
+            # 检查2: 综合检查：重复检测 + 队列公平性
             can_add, error_msg = self._duplicate_detector.can_user_add_song(audio_info, requester, current_queue_length)
             if not can_add:
                 self.logger.info(
