@@ -10,12 +10,7 @@ from similubot.core.command_registry import CommandRegistry
 from similubot.progress.discord_updater import DiscordProgressUpdater
 from similubot.progress.music_progress import MusicProgressBar
 from similubot.utils.config_manager import ConfigManager
-
-# 为了兼容性，支持多种音乐播放器类型
-try:
-    from similubot.music.music_player import MusicPlayer
-except ImportError:
-    MusicPlayer = None
+from similubot.queue.user_queue_status import UserQueueStatusService
 
 
 class MusicCommands:
@@ -71,6 +66,7 @@ class MusicCommands:
             "!music <catbox音频链接> - 添加Catbox音频文件到队列并开始播放",
             "!music queue - 显示当前播放队列",
             "!music now - 显示当前歌曲播放进度",
+            "!music my - 查看您的队列状态和预计播放时间",
             "!music skip - 跳过当前歌曲",
             "!music stop - 停止播放并清空队列",
             "!music jump <数字> - 跳转到队列指定位置",
@@ -112,6 +108,8 @@ class MusicCommands:
             await self._handle_queue_command(ctx)
         elif subcommand in ["now", "current", "playing"]:
             await self._handle_now_command(ctx)
+        elif subcommand in ["my", "mine", "mystatus"]:
+            await self._handle_my_command(ctx)
         elif subcommand in ["skip", "next"]:
             await self._handle_skip_command(ctx)
         elif subcommand in ["stop", "disconnect", "leave"]:
@@ -174,7 +172,7 @@ class MusicCommands:
                 if error and "已经请求了这首歌曲" in error:
                     await self._send_duplicate_song_embed(response, error)
                 elif error and ("已经有" in error and "首歌曲在队列中" in error):
-                    await self._send_queue_fairness_embed(response, error)
+                    await self._send_queue_fairness_embed(response, error, ctx.author)
                 elif error and "正在播放中" in error:
                     await self._send_currently_playing_embed(response, error)
                 elif error and "歌曲时长" in error and "超过了最大限制" in error:
@@ -434,6 +432,92 @@ class MusicCommands:
             self.logger.error(f"Error in now command: {e}", exc_info=True)
             await ctx.reply("❌ 获取当前歌曲信息时出错")
 
+    async def _handle_my_command(self, ctx: commands.Context) -> None:
+        """
+        处理用户队列状态查询命令 (!music my)
+
+        显示用户当前在队列中的歌曲详情，包括：
+        - 歌曲名称
+        - 队列位置
+        - 预计播放时间
+
+        Args:
+            ctx: Discord命令上下文
+        """
+        try:
+            # 检查服务器是否存在
+            if not ctx.guild:
+                await ctx.reply("❌ 此命令只能在服务器中使用")
+                return
+
+            # 创建用户队列状态服务实例
+            # 使用音乐播放器适配器的内部播放引擎
+            if not hasattr(self.music_player, '_playback_engine'):
+                await ctx.reply("❌ 音乐播放器未正确初始化")
+                return
+
+            user_queue_service = UserQueueStatusService(self.music_player._playback_engine)
+
+            # 获取用户队列信息
+            user_info = user_queue_service.get_user_queue_info(ctx.author, ctx.guild.id)
+
+            # 创建响应嵌入消息
+            if not user_info.has_queued_song:
+                embed = discord.Embed(
+                    title="🎵 我的队列状态",
+                    description="您当前没有歌曲在队列中。",
+                    color=discord.Color.blue()
+                )
+                embed.add_field(
+                    name="💡 提示",
+                    value="使用 `!music <YouTube链接>` 或 `!music <Catbox链接>` 来添加歌曲到队列。",
+                    inline=False
+                )
+            else:
+                # 用户有歌曲在队列中
+                if user_info.is_currently_playing:
+                    embed = discord.Embed(
+                        title="🎵 我的队列状态",
+                        description=f"您的歌曲正在播放中！",
+                        color=discord.Color.green()
+                    )
+                    embed.add_field(
+                        name="🎶 正在播放",
+                        value=f"**{user_info.queued_song_title}**",
+                        inline=False
+                    )
+                else:
+                    embed = discord.Embed(
+                        title="🎵 我的队列状态",
+                        description="您有歌曲在队列中等待播放。",
+                        color=discord.Color.orange()
+                    )
+                    embed.add_field(
+                        name="🎶 排队歌曲",
+                        value=f"**{user_info.queued_song_title}**",
+                        inline=False
+                    )
+
+                    if user_info.queue_position:
+                        embed.add_field(
+                            name="📍 队列位置",
+                            value=f"第 {user_info.queue_position} 位",
+                            inline=True
+                        )
+
+                    if user_info.estimated_play_time_seconds is not None:
+                        embed.add_field(
+                            name="⏰ 预计播放时间",
+                            value=f"{user_info.format_estimated_time()} 后",
+                            inline=True
+                        )
+
+            await ctx.reply(embed=embed)
+
+        except Exception as e:
+            self.logger.error(f"Error in my command: {e}", exc_info=True)
+            await ctx.reply("❌ 获取您的队列状态时出错")
+
     async def _handle_skip_command(self, ctx: commands.Context) -> None:
         """
         Handle skip command.
@@ -651,6 +735,7 @@ class MusicCommands:
             "`!music <catbox音频链接>` - 添加Catbox音频文件到队列\n"
             "`!music queue` - 显示当前队列\n"
             "`!music now` - 显示当前歌曲\n"
+            "`!music my` - 查看您的队列状态\n"
             "`!music skip` - 跳过当前歌曲\n"
             "`!music stop` - 停止播放并清空队列\n"
             "`!music jump <数字>` - 跳转到指定位置\n"
@@ -713,28 +798,58 @@ class MusicCommands:
         )
         await message.edit(content=None, embed=embed)
 
-    async def _send_queue_fairness_embed(self, message: discord.Message, error_message: str) -> None:
+    async def _send_queue_fairness_embed(self, message: discord.Message, error_message: str, user: Union[discord.User, discord.Member]) -> None:
         """
-        Send queue fairness error embed message.
+        发送队列公平性错误嵌入消息，包含详细的用户队列状态信息
 
         Args:
-            message: Message to edit
-            error_message: Queue fairness error message
+            message: 要编辑的消息
+            error_message: 队列公平性错误消息
+            user: 触发错误的用户
         """
         embed = discord.Embed(
             title="⚖️ 队列公平性限制",
-            description=error_message,
+            description="您已经有歌曲在队列中，请等待播放完成后再添加新歌曲。",
             color=discord.Color.orange()
         )
+
         embed.add_field(
             name="📋 队列规则",
             value="为了保证所有用户的公平使用，每位用户同时只能有一首歌曲在队列中等待播放。",
             inline=False
         )
 
-        # 尝试获取队列状态信息
+        # 尝试获取用户的详细队列状态信息
         try:
-            if hasattr(self.music_player, 'get_queue_info'):
+            # 显示用户特定的队列状态（仅对成员用户）
+            if hasattr(self.music_player, '_playback_engine') and message.guild and isinstance(user, discord.Member):
+                user_queue_service = UserQueueStatusService(self.music_player._playback_engine)
+
+                # 获取用户的详细队列信息
+                user_info = user_queue_service.get_user_queue_info(user, message.guild.id)
+
+                if user_info.has_queued_song:
+                    if user_info.is_currently_playing:
+                        embed.add_field(
+                            name="🎶 您的歌曲状态",
+                            value=f"**{user_info.queued_song_title}** 正在播放中",
+                            inline=False
+                        )
+                    else:
+                        status_text = f"**{user_info.queued_song_title}**"
+                        if user_info.queue_position:
+                            status_text += f"\n📍 队列位置: 第 {user_info.queue_position} 位"
+                        if user_info.estimated_play_time_seconds is not None:
+                            status_text += f"\n⏰ 预计播放时间: {user_info.format_estimated_time()} 后"
+
+                        embed.add_field(
+                            name="🎶 您的排队歌曲",
+                            value=status_text,
+                            inline=False
+                        )
+
+            # 显示通用队列状态（对所有用户）
+            if message.guild:
                 queue_info = await self.music_player.get_queue_info(message.guild.id)
                 if queue_info:
                     embed.add_field(
@@ -742,14 +857,28 @@ class MusicCommands:
                         value=f"队列长度: {queue_info.get('queue_length', 0)} 首歌曲",
                         inline=True
                     )
-        except Exception:
-            pass  # 忽略获取队列信息的错误
+
+        except Exception as e:
+            self.logger.debug(f"获取详细队列状态信息失败: {e}")
+            # 如果获取详细信息失败，显示基本信息
+            try:
+                if hasattr(self.music_player, 'get_queue_info') and message.guild:
+                    queue_info = await self.music_player.get_queue_info(message.guild.id)
+                    if queue_info:
+                        embed.add_field(
+                            name="📊 当前队列状态",
+                            value=f"队列长度: {queue_info.get('queue_length', 0)} 首歌曲",
+                            inline=True
+                        )
+            except Exception:
+                pass  # 忽略获取队列信息的错误
 
         embed.add_field(
             name="💡 建议",
-            value="请等待您当前的歌曲播放完成后再添加新歌曲。",
+            value="使用 `!music my` 命令查看您当前的队列状态和预计播放时间。",
             inline=False
         )
+
         await message.edit(content=None, embed=embed)
 
     async def _send_currently_playing_embed(self, message: discord.Message, error_message: str) -> None:

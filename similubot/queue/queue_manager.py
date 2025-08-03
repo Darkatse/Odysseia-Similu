@@ -32,12 +32,19 @@ class QueueFairnessError(Exception):
     队列公平性异常
 
     当用户违反队列公平性规则时抛出（例如：已有歌曲在队列中时尝试添加新歌曲）。
+    包含详细的用户队列状态信息，用于生成更有用的错误消息。
     """
-    def __init__(self, message: str, song_title: str, user_name: str, pending_count: int = 0):
+    def __init__(self, message: str, song_title: str, user_name: str, pending_count: int = 0,
+                 queued_song_title: Optional[str] = None, queue_position: Optional[int] = None,
+                 estimated_play_time_seconds: Optional[int] = None):
         super().__init__(message)
-        self.song_title = song_title
+        self.song_title = song_title  # 用户尝试添加的歌曲标题
         self.user_name = user_name
         self.pending_count = pending_count
+        # 新增的详细队列状态信息
+        self.queued_song_title = queued_song_title  # 用户当前在队列中的歌曲标题
+        self.queue_position = queue_position  # 队列位置（从1开始）
+        self.estimated_play_time_seconds = estimated_play_time_seconds  # 预计播放时间（秒）
 
 
 class SongTooLongError(Exception):
