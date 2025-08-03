@@ -477,8 +477,15 @@ class PlaybackEngine(IPlaybackEngine):
                     break  # 队列为空
                 
                 # 检查添加歌曲至队列的用户是否仍在语音频道，不在则跳过
-                if not song.requester.voice or not song.requester.voice.channel:
-                    self.logger.info(f"点歌人 {song.requester.name} 不在语音频道，跳过歌曲: {song.title}")
+                # 处理 MockMember（已离开服务器的用户）和真实用户
+                requester_name = getattr(song.requester, 'name', song.requester.display_name)
+                is_mock_member = not hasattr(song.requester, 'guild') or song.requester.__class__.__name__ == 'MockMember'
+
+                if is_mock_member or not song.requester.voice or not song.requester.voice.channel:
+                    if is_mock_member:
+                        self.logger.info(f"点歌人 {requester_name} 已离开服务器，跳过歌曲: {song.title}")
+                    else:
+                        self.logger.info(f"点歌人 {requester_name} 不在语音频道，跳过歌曲: {song.title}")
 
                     # 获取文本频道ID用于发送通知
                     text_channel_id = self.get_text_channel_id(guild_id)
@@ -667,11 +674,18 @@ class PlaybackEngine(IPlaybackEngine):
                 self.logger.debug(f"📭 没有下一首歌曲 - 服务器 {guild_id}")
                 return
 
-            self.logger.debug(f"🔍 检查下一首歌曲的点歌人状态: {next_song.title} - {next_song.requester.name}")
+            # 处理 MockMember（已离开服务器的用户）和真实用户
+            requester_name = getattr(next_song.requester, 'name', next_song.requester.display_name)
+            is_mock_member = not hasattr(next_song.requester, 'guild') or next_song.requester.__class__.__name__ == 'MockMember'
+
+            self.logger.debug(f"🔍 检查下一首歌曲的点歌人状态: {next_song.title} - {requester_name}")
 
             # 检查下一首歌曲的点歌人是否在语音频道
-            if not next_song.requester.voice or not next_song.requester.voice.channel:
-                self.logger.debug(f"📢 下一首歌曲的点歌人 {next_song.requester.name} 不在语音频道，发送提醒通知")
+            if is_mock_member or not next_song.requester.voice or not next_song.requester.voice.channel:
+                if is_mock_member:
+                    self.logger.debug(f"📢 下一首歌曲的点歌人 {requester_name} 已离开服务器，发送提醒通知")
+                else:
+                    self.logger.debug(f"📢 下一首歌曲的点歌人 {requester_name} 不在语音频道，发送提醒通知")
 
                 # 获取文本频道ID用于发送通知
                 text_channel_id = self.get_text_channel_id(guild_id)
@@ -687,7 +701,7 @@ class PlaybackEngine(IPlaybackEngine):
                 else:
                     self.logger.warning(f"⚠️ 服务器 {guild_id} 没有设置文本频道，无法发送提醒通知")
             else:
-                self.logger.debug(f"✅ 下一首歌曲的点歌人 {next_song.requester.name} 在语音频道中")
+                self.logger.debug(f"✅ 下一首歌曲的点歌人 {requester_name} 在语音频道中")
 
         except Exception as e:
             self.logger.error(f"❌ 检查下一首歌曲通知时出错 - 服务器 {guild_id}: {e}", exc_info=True)

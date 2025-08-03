@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union, Any
 import discord
 
 from similubot.core.interfaces import AudioInfo, SongInfo
@@ -21,7 +21,7 @@ class Song(SongInfo):
     实现了 SongInfo 接口，提供统一的歌曲信息访问。
     """
     audio_info: AudioInfo
-    requester: discord.Member
+    requester: Union[discord.Member, Any]  # 允许 discord.Member 或 MockMember
     added_at: datetime = field(default_factory=datetime.now)
     
     def __post_init__(self):
@@ -141,6 +141,13 @@ class Song(SongInfo):
                         self.id = user_id
                         self.display_name = name
                         self.guild = guild_obj
+                        # 添加 voice 属性，MockMember 代表已离开服务器的用户，所以 voice 为 None
+                        self.voice = None
+
+                    @property
+                    def name(self) -> str:
+                        """返回用户名称，用于日志显示"""
+                        return self.display_name
                 
                 requester = MockMember(data['requester_id'], data['requester_name'], guild)
             

@@ -251,6 +251,57 @@ class TestBilibiliIntegration:
             import pytest
             pytest.skip("MusicPlayerAdapter 不可用")
 
+    def test_mock_member_voice_attribute_fix(self):
+        """测试 MockMember 的 voice 属性修复"""
+        # 这个测试验证修复后的 MockMember 类有正确的 voice 属性
+        from similubot.queue.song import Song
+        from similubot.core.interfaces import AudioInfo
+        from datetime import datetime
+
+        # 创建模拟的 Discord 服务器，用户已离开
+        mock_guild = Mock()
+        mock_guild.id = 1134557553011998840
+        mock_guild.get_member = Mock(return_value=None)  # 用户已离开服务器
+
+        # 创建歌曲数据
+        song_data = {
+            'requester_id': 123456789,
+            'requester_name': '已离开的用户',
+            'title': 'MockMember 测试歌曲',
+            'duration': 180,
+            'url': 'https://www.bilibili.com/video/BV1uv411q7Mv',
+            'uploader': '测试UP主',
+            'added_at': datetime.now().isoformat()
+        }
+
+        # 从字典创建歌曲对象（这会创建 MockMember）
+        song = Song.from_dict(song_data, mock_guild)
+
+        assert song is not None, "应该成功创建歌曲对象"
+
+        # 验证 MockMember 有 voice 属性
+        requester = song.requester
+        assert hasattr(requester, 'voice'), "MockMember 应该有 voice 属性"
+        assert requester.voice is None, "MockMember 的 voice 属性应该为 None"
+
+        # 验证 name 属性
+        assert hasattr(requester, 'name'), "MockMember 应该有 name 属性"
+        assert requester.name == '已离开的用户', "MockMember 的 name 应该正确"
+
+        # 验证播放引擎中的检查逻辑不会出错
+        try:
+            # 模拟播放引擎中的检查
+            if not song.requester.voice or not song.requester.voice.channel:
+                # 这应该正常执行，不抛出 AttributeError
+                pass
+
+            # 测试访问 voice.channel 也不会出错
+            voice_channel = song.requester.voice.channel if song.requester.voice else None
+            assert voice_channel is None, "MockMember 的 voice.channel 应该为 None"
+
+        except AttributeError as e:
+            pytest.fail(f"MockMember voice 属性访问失败: {e}")
+
 
 @pytest.mark.skipif(BILIBILI_INTEGRATION_AVAILABLE, reason="测试依赖不可用时的行为")
 class TestBilibiliIntegrationUnavailable:
