@@ -302,3 +302,16 @@ class ConfigManager:
             True if manual prompting is enabled, False otherwise
         """
         return self.get('music.youtube.fallback.prompt_for_manual_potoken', False)
+
+    # Playback Event Configuration Methods
+    def is_notify_absent_users_enabled(self) -> bool:
+        """
+        Check if notifications to absent users are enabled.
+
+        When enabled, the bot will send "your song is next" notifications
+        to users who are not in the voice channel when their song is about to play.
+
+        Returns:
+            True if absent user notifications are enabled, False otherwise
+        """
+        return self.get('playback.notify_absent_users', True)

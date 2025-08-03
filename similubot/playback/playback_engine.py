@@ -67,7 +67,10 @@ class PlaybackEngine(IPlaybackEngine):
         self._playback_start_times: Dict[int, float] = {}
         self._playback_paused_times: Dict[int, float] = {}
         self._total_paused_duration: Dict[int, float] = {}
-        
+
+        # 文本频道跟踪（用于发送通知消息）
+        self._text_channels: Dict[int, int] = {}  # guild_id -> text_channel_id
+
         self.logger.info("🎵 播放引擎初始化完成")
     
     def get_queue_manager(self, guild_id: int) -> IQueueManager:
@@ -86,7 +89,30 @@ class PlaybackEngine(IPlaybackEngine):
             self.logger.debug(f"为服务器 {guild_id} 创建队列管理器")
         
         return self._queue_managers[guild_id]
-    
+
+    def set_text_channel(self, guild_id: int, channel_id: int) -> None:
+        """
+        设置服务器的文本频道ID（用于发送通知消息）
+
+        Args:
+            guild_id: Discord服务器ID
+            channel_id: 文本频道ID
+        """
+        self._text_channels[guild_id] = channel_id
+        self.logger.debug(f"设置服务器 {guild_id} 的文本频道: {channel_id}")
+
+    def get_text_channel_id(self, guild_id: int) -> Optional[int]:
+        """
+        获取服务器的文本频道ID
+
+        Args:
+            guild_id: Discord服务器ID
+
+        Returns:
+            文本频道ID，如果未设置则返回None
+        """
+        return self._text_channels.get(guild_id)
+
     # 事件处理器 (Dict [str, List[callable]])
 
     _event_handlers = {
@@ -451,11 +477,17 @@ class PlaybackEngine(IPlaybackEngine):
                     break  # 队列为空
                 
                 # 检查添加歌曲至队列的用户是否仍在语音频道，不在则跳过
-                if not song.requester.voice.channel or not song.requester.voice:
+                if not song.requester.voice or not song.requester.voice.channel:
                     self.logger.info(f"点歌人 {song.requester.name} 不在语音频道，跳过歌曲: {song.title}")
-                    asyncio.create_task(
-                        self._trigger_event("song_requester_absent_skip", guild_id=guild_id, channel_id=self.voice_manager.get_connection_info(guild_id)["channel"], song=song)
-                    )
+
+                    # 获取文本频道ID用于发送通知
+                    text_channel_id = self.get_text_channel_id(guild_id)
+                    if text_channel_id:
+                        asyncio.create_task(
+                            self._trigger_event("song_requester_absent_skip", guild_id=guild_id, channel_id=text_channel_id, song=song)
+                        )
+                    else:
+                        self.logger.warning(f"⚠️ 服务器 {guild_id} 没有设置文本频道，无法发送跳过通知")
                     continue
 
                 # 下载音频文件
@@ -510,6 +542,19 @@ class PlaybackEngine(IPlaybackEngine):
 
             self.logger.info(f"正在播放: {song.title}")
 
+            # 触发歌曲信息显示事件（修复缺失的事件触发）
+            self.logger.debug(f"🎵 触发歌曲信息显示事件 - 服务器 {guild_id}, 歌曲: {song.title}")
+            text_channel_id = self.get_text_channel_id(guild_id)
+            if text_channel_id:
+                asyncio.create_task(
+                    self._trigger_event("show_song_info", guild_id=guild_id, channel_id=text_channel_id, song=song)
+                )
+            else:
+                self.logger.warning(f"⚠️ 服务器 {guild_id} 没有设置文本频道，无法显示歌曲信息")
+
+            # 检查下一首歌曲的点歌人状态并发送通知（如果配置启用）
+            await self._check_and_notify_next_song(guild_id)
+
             # 等待播放完成
             await playback_finished.wait()
 
@@ -550,17 +595,18 @@ class PlaybackEngine(IPlaybackEngine):
             if guild_id in self._playback_paused_times:
                 del self._playback_paused_times[guild_id]
 
-            # 输出正在播放的歌曲信息
-            asyncio.create_task(
-                self._trigger_event("show_song_info", guild_id=guild_id, channel_id=self.voice_manager.get_connection_info(guild_id)["channel"], song=song)
-            )
-
-            # 输出轮到你的歌的通知
-            next_song = await self.get_queue_manager(guild_id).get_next_song()
-            if next_song and (not next_song.requester.voice.channel or not next_song.requester.voice): # TA疑似跑路了
+            # 触发歌曲信息显示事件
+            self.logger.debug(f"🎵 触发歌曲信息显示事件 - 服务器 {guild_id}, 歌曲: {song.title}")
+            text_channel_id = self.get_text_channel_id(guild_id)
+            if text_channel_id:
                 asyncio.create_task(
-                    self._trigger_event("your_song_notification", guild_id=guild_id, channel_id=self.voice_manager.get_connection_info(guild_id)["channel"], song=next_song)
+                    self._trigger_event("show_song_info", guild_id=guild_id, channel_id=text_channel_id, song=song)
                 )
+            else:
+                self.logger.warning(f"⚠️ 服务器 {guild_id} 没有设置文本频道，无法显示歌曲信息")
+
+            # 检查下一首歌曲的点歌人状态并发送通知（如果配置启用）
+            await self._check_and_notify_next_song(guild_id)
 
             self.logger.info(f"正在播放: {song.title}")
 
@@ -592,7 +638,58 @@ class PlaybackEngine(IPlaybackEngine):
                 self.logger.warning(f"清理音频文件失败: {e}")
             finally:
                 del self._current_audio_files[guild_id]
-    
+
+    async def _check_and_notify_next_song(self, guild_id: int) -> None:
+        """
+        检查下一首歌曲的点歌人状态并发送通知（如果配置启用）
+
+        这是一个可配置的功能，允许服务器管理员控制是否向缺席用户发送
+        "轮到你的歌了"的提醒通知。
+
+        Args:
+            guild_id: 服务器ID
+        """
+        try:
+            # 检查配置是否启用缺席用户通知
+            notify_absent_users = True  # 默认启用
+            if self.config:
+                notify_absent_users = self.config.is_notify_absent_users_enabled()
+
+            if not notify_absent_users:
+                self.logger.debug(f"🔕 缺席用户通知已禁用 - 服务器 {guild_id}")
+                return
+
+            # 获取下一首歌曲
+            queue_manager = self.get_queue_manager(guild_id)
+            next_song = await queue_manager.get_next_song()
+
+            if not next_song:
+                self.logger.debug(f"📭 没有下一首歌曲 - 服务器 {guild_id}")
+                return
+
+            # 检查下一首歌曲的点歌人是否在语音频道
+            if not next_song.requester.voice or not next_song.requester.voice.channel:
+                self.logger.debug(f"📢 下一首歌曲的点歌人 {next_song.requester.name} 不在语音频道，发送提醒通知")
+
+                # 获取文本频道ID用于发送通知
+                text_channel_id = self.get_text_channel_id(guild_id)
+                if text_channel_id:
+                    asyncio.create_task(
+                        self._trigger_event(
+                            "your_song_notification",
+                            guild_id=guild_id,
+                            channel_id=text_channel_id,
+                            song=next_song
+                        )
+                    )
+                else:
+                    self.logger.warning(f"⚠️ 服务器 {guild_id} 没有设置文本频道，无法发送提醒通知")
+            else:
+                self.logger.debug(f"✅ 下一首歌曲的点歌人 {next_song.requester.name} 在语音频道中")
+
+        except Exception as e:
+            self.logger.error(f"❌ 检查下一首歌曲通知时出错 - 服务器 {guild_id}: {e}", exc_info=True)
+
     async def initialize_persistence(self) -> None:
         """初始化持久化系统并恢复所有队列状态"""
         if not self.persistence_manager:

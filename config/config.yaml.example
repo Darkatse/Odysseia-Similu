@@ -20,6 +20,12 @@ music:
     before: "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"  # 输入前的 FFmpeg 选项
     options: "-vn"  # FFmpeg 选项（无视频）
 
+# 播放事件配置
+playback:
+  notify_absent_users: true  # 是否向缺席用户发送"轮到你的歌了"提醒通知
+                            # 设置为 false 可禁用对不在语音频道的用户的提前通知
+                            # 默认: true（启用通知）
+
   # YouTube PoToken 配置（绕过机器人检测）
   youtube:
     # 自动机器人检测处理

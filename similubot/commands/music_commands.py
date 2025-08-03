@@ -147,6 +147,11 @@ class MusicCommands:
             await ctx.reply(f"❌ {error}")
             return
 
+        # Set the text channel for event notifications (修复事件通知频道问题)
+        if hasattr(self.music_player, '_playback_engine') and ctx.guild:
+            self.music_player._playback_engine.set_text_channel(ctx.guild.id, ctx.channel.id)
+            self.logger.debug(f"🔧 设置服务器 {ctx.guild.id} 的文本频道为 {ctx.channel.id}")
+
         # Detect source type for initial message
         source_type = self.music_player.detect_audio_source_type(url)
         source_name = source_type.value.title() if source_type else "Audio"

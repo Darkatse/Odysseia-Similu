@@ -8,6 +8,7 @@ from discord.ext import commands
 # 核心模块
 from similubot.core.command_registry import CommandRegistry
 from similubot.core.event_handler import EventHandler
+from similubot.core.dependency_container import DependencyContainer
 
 # 命令模块
 from similubot.commands.general_commands import GeneralCommands
@@ -33,13 +34,16 @@ class SimiluBot:
 
     def __init__(self, config: ConfigManager):
         """
-        Initialize the Discord bot.
+        Initialize the Discord bot with modern dependency injection.
 
         Args:
             config: Configuration manager
         """
         self.logger = logging.getLogger("similubot.bot")
         self.config = config
+
+        # Initialize dependency injection container
+        self.container = DependencyContainer()
 
         # Set up Discord bot
         intents = discord.Intents.default()
@@ -54,7 +58,8 @@ class SimiluBot:
         # 存储对自身的引用，供事件处理器使用
         self.bot._similu_bot = self
 
-        # Initialize core components
+        # Register dependencies and initialize core components
+        self._register_dependencies()
         self._init_core_modules()
 
         # Initialize command modules
@@ -69,49 +74,113 @@ class SimiluBot:
 
         self.logger.info("🎵 音乐机器人初始化成功")
 
+    def _register_dependencies(self) -> None:
+        """
+        注册依赖项到依赖注入容器
+
+        定义组件间的依赖关系，确保按正确顺序初始化。
+        """
+        # 创建临时目录工厂函数
+        def create_temp_dir() -> str:
+            temp_dir = self.config.get('download.temp_dir', './temp')
+            if not os.path.exists(temp_dir):
+                os.makedirs(temp_dir)
+                self.logger.debug(f"创建临时目录: {temp_dir}")
+            return temp_dir
+
+        # 播放引擎工厂函数
+        def create_playback_engine(temp_dir: str) -> PlaybackEngine:
+            return PlaybackEngine(
+                bot=self.bot,
+                temp_dir=temp_dir,
+                config=self.config
+            )
+
+        # 音乐播放器适配器工厂函数
+        def create_music_player_adapter(playback_engine: PlaybackEngine) -> MusicPlayerAdapter:
+            return MusicPlayerAdapter(playback_engine)
+
+        # 播放事件处理器工厂函数
+        def create_playback_event(music_player_adapter: MusicPlayerAdapter):
+            from similubot.playback.playback_event import PlaybackEvent
+            return PlaybackEvent(music_player_adapter=music_player_adapter)
+
+        # 命令注册器工厂函数
+        def create_command_registry() -> CommandRegistry:
+            return CommandRegistry(
+                bot=self.bot,
+                auth_manager=None,
+                unauthorized_handler=None
+            )
+
+        # 注册依赖项（按依赖顺序）
+        self.container.register_singleton("temp_dir", create_temp_dir)
+        self.container.register_singleton("playback_engine", create_playback_engine, ["temp_dir"])
+        self.container.register_singleton("music_player_adapter", create_music_player_adapter, ["playback_engine"])
+        self.container.register_singleton("playback_event", create_playback_event, ["music_player_adapter"])
+        self.container.register_singleton("command_registry", create_command_registry)
+
+        # 验证依赖关系
+        self.container.validate_dependencies()
+        self.logger.debug("📝 依赖项注册完成")
+
     def _init_core_modules(self) -> None:
-        """初始化核心机器人模块"""
-        # 创建临时目录（如果不存在）
-        temp_dir = self.config.get('download.temp_dir', './temp')
-        if not os.path.exists(temp_dir):
-            os.makedirs(temp_dir)
-            self.logger.debug(f"创建临时目录: {temp_dir}")
+        """
+        使用依赖注入容器初始化核心机器人模块
 
-        # 初始化新架构的播放引擎
-        self.playback_engine = PlaybackEngine(
-            bot=self.bot,
-            temp_dir=temp_dir,
-            config=self.config
-        )
+        通过依赖注入容器自动解析和初始化所有组件，
+        确保依赖关系正确且避免初始化顺序问题。
+        """
+        try:
+            # 解析所有核心依赖项
+            self.logger.debug("🔧 开始解析核心依赖项...")
 
-        # 注册播放事件处理器
-        self._register_playback_events()
+            # 按依赖顺序解析组件
+            temp_dir = self.container.resolve("temp_dir")
+            self.playback_engine = self.container.resolve("playback_engine")
+            self.music_player = self.container.resolve("music_player_adapter")
+            self.playback_event = self.container.resolve("playback_event")
+            self.command_registry = self.container.resolve("command_registry")
 
-        # 创建兼容性适配器，确保现有命令正常工作
-        self.music_player = MusicPlayerAdapter(self.playback_engine)
+            # 注册播放事件处理器到播放引擎
+            self._register_playback_events_to_engine()
 
-        # 初始化命令注册器（简化版，不需要授权系统）
-        self.command_registry = CommandRegistry(
-            bot=self.bot,
-            auth_manager=None,
-            unauthorized_handler=None
-        )
+            self.logger.info("✅ 核心模块初始化完成")
 
-        self.logger.debug("核心模块初始化完成")
+        except Exception as e:
+            self.logger.error(f"❌ 核心模块初始化失败: {e}", exc_info=True)
+            raise RuntimeError(f"核心模块初始化失败: {e}") from e
 
-    def _register_playback_events(self) -> None:
-        """注册播放事件处理器"""
-        from similubot.playback.playback_event import PlaybackEvent
-        
-        # 创建播放事件处理器实例
-        self.playback_event = PlaybackEvent()
-        
-        # 注册事件处理器
-        self.playback_engine.add_event_handler("show_song_info", self.playback_event.show_song_info)
-        self.playback_engine.add_event_handler("song_requester_absent_skip", self.playback_event.absent_skip)
-        self.playback_engine.add_event_handler("your_song_notification", self.playback_event.your_song_notification)
-        
-        self.logger.debug("播放事件处理器注册完成")
+    def _register_playback_events_to_engine(self) -> None:
+        """
+        将播放事件处理器注册到播放引擎
+
+        此时所有依赖项都已通过依赖注入容器正确初始化，
+        只需要将事件处理器的方法注册到播放引擎即可。
+        """
+        try:
+            # 验证必要的组件已初始化
+            if not self.playback_engine:
+                raise RuntimeError("播放引擎未初始化")
+            if not self.playback_event:
+                raise RuntimeError("播放事件处理器未创建")
+
+            # 注册事件处理器到播放引擎
+            event_mappings = {
+                "show_song_info": self.playback_event.show_song_info,
+                "song_requester_absent_skip": self.playback_event.song_requester_absent_skip,
+                "your_song_notification": self.playback_event.your_song_notification
+            }
+
+            for event_type, handler in event_mappings.items():
+                self.playback_engine.add_event_handler(event_type, handler)
+                self.logger.debug(f"📝 注册事件处理器: {event_type}")
+
+            self.logger.info("✅ 播放事件处理器注册到引擎完成")
+
+        except Exception as e:
+            self.logger.error(f"❌ 播放事件处理器注册失败: {e}", exc_info=True)
+            raise RuntimeError(f"播放事件处理器注册失败: {e}") from e
 
     def _init_command_modules(self) -> None:
         """初始化命令模块。"""
