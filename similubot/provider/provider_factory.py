@@ -10,6 +10,15 @@ from similubot.utils.config_manager import ConfigManager
 from .youtube_provider import YouTubeProvider
 from .catbox_provider import CatboxProvider
 
+try:
+    from .bilibili_provider import BilibiliProvider
+    BILIBILI_PROVIDER_AVAILABLE = True
+except ImportError as e:
+    BILIBILI_PROVIDER_AVAILABLE = False
+    import logging
+    logger = logging.getLogger("similubot.provider.factory")
+    logger.warning(f"Bilibili 提供者不可用: {e}")
+
 
 class AudioProviderFactory:
     """
@@ -35,12 +44,20 @@ class AudioProviderFactory:
             YouTubeProvider(temp_dir, config),
             CatboxProvider(temp_dir)
         ]
-        
+
+        # 添加 Bilibili 提供者（如果可用）
+        if BILIBILI_PROVIDER_AVAILABLE:
+            self._providers.append(BilibiliProvider(temp_dir))
+
         # 创建提供者映射
         self._provider_map: Dict[str, IAudioProvider] = {
             'youtube': self._providers[0],
             'catbox': self._providers[1]
         }
+
+        # 添加 Bilibili 提供者到映射（如果可用）
+        if BILIBILI_PROVIDER_AVAILABLE and len(self._providers) > 2:
+            self._provider_map['bilibili'] = self._providers[2]
     
     def get_supported_providers(self) -> List[str]:
         """

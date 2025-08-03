@@ -82,6 +82,7 @@ class GeneralCommands:
             name="🎶 音乐播放命令",
             value=f"`{ctx.bot.command_prefix}music <YouTube链接>` - 播放 YouTube 视频音频\n"
                   f"`{ctx.bot.command_prefix}music <Catbox链接>` - 播放 Catbox 音频文件\n"
+                  f"`{ctx.bot.command_prefix}music <Bilibili链接>` - 播放 Bilibili 视频音频\n"
                   f"`{ctx.bot.command_prefix}music queue` - 显示播放队列\n"
                   f"`{ctx.bot.command_prefix}music now` - 显示当前播放进度\n"
                   f"`{ctx.bot.command_prefix}music skip` - 跳过当前歌曲\n"
@@ -178,7 +179,7 @@ class GeneralCommands:
 
             # 音乐命令
             music_commands = [
-                f"`{ctx.bot.command_prefix}music <链接>` - 播放 YouTube 或 Catbox 音频",
+                f"`{ctx.bot.command_prefix}music <链接>` - 播放 YouTube、Catbox 或 Bilibili 音频",
                 f"`{ctx.bot.command_prefix}music queue` - 显示播放队列",
                 f"`{ctx.bot.command_prefix}music now` - 显示当前播放进度",
                 f"`{ctx.bot.command_prefix}music skip` - 跳过当前歌曲",

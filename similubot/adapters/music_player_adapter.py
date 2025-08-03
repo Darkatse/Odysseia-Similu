@@ -13,16 +13,13 @@ from discord.ext import commands
 
 from similubot.playback.playback_engine import PlaybackEngine
 from similubot.progress.base import ProgressCallback
+from enum import Enum
 
-# 为了兼容性，定义音频源类型
-try:
-    from similubot.music.audio_source import AudioSourceType
-except ImportError:
-    from enum import Enum
-    class AudioSourceType(Enum):
-        YOUTUBE = "youtube"
-        CATBOX = "catbox"
 
+class AudioSourceType(Enum):
+    YOUTUBE = "youtube"
+    CATBOX = "catbox"
+    BILIBILI = "bilibili"
 
 class MusicPlayerAdapter:
     """
@@ -50,6 +47,7 @@ class MusicPlayerAdapter:
         # 创建兼容的客户端接口
         self.youtube_client = self._create_youtube_client_adapter()
         self.catbox_client = self._create_catbox_client_adapter()
+        self.bilibili_client = self._create_bilibili_client_adapter()
         self.voice_manager = playback_engine.voice_manager
         self.seek_manager = playback_engine.seek_manager
         
@@ -113,7 +111,35 @@ class MusicPlayerAdapter:
                     return f"{size_bytes} B"
 
         return CatboxClientAdapter(self._playback_engine.audio_provider_factory)
-    
+
+    def _create_bilibili_client_adapter(self):
+        """创建 Bilibili 客户端适配器"""
+        class BilibiliClientAdapter:
+            def __init__(self, provider_factory):
+                self.provider_factory = provider_factory
+                self.bilibili_provider = provider_factory.get_provider_by_name('bilibili')
+
+            async def extract_audio_info(self, url: str):
+                if self.bilibili_provider:
+                    return await self.bilibili_provider.extract_audio_info(url)
+                return None
+
+            def format_duration(self, duration: int) -> str:
+                """格式化时长为可读字符串"""
+                if duration is None or duration <= 0:
+                    return "Unknown duration"
+
+                minutes = duration // 60
+                seconds = duration % 60
+                if minutes >= 60:
+                    hours = minutes // 60
+                    minutes = minutes % 60
+                    return f"{hours}:{minutes:02d}:{seconds:02d}"
+                else:
+                    return f"{minutes}:{seconds:02d}"
+
+        return BilibiliClientAdapter(self._playback_engine.audio_provider_factory)
+
     def is_supported_url(self, url: str) -> bool:
         """
         检查URL是否被支持
@@ -129,22 +155,25 @@ class MusicPlayerAdapter:
     def detect_audio_source_type(self, url: str) -> Optional[AudioSourceType]:
         """
         检测音频源类型
-        
+
         Args:
             url: 音频URL
-            
+
         Returns:
             音频源类型，如果不支持则返回None
         """
         provider = self._playback_engine.audio_provider_factory.detect_provider_for_url(url)
         if not provider:
             return None
-        
-        if provider.name.lower() == 'youtube':
+
+        provider_name = provider.name.lower()
+        if provider_name == 'youtube':
             return AudioSourceType.YOUTUBE
-        elif provider.name.lower() == 'catbox':
+        elif provider_name == 'catbox':
             return AudioSourceType.CATBOX
-        
+        elif provider_name == 'bilibili':
+            return AudioSourceType.BILIBILI
+
         return None
     
     async def connect_to_user_channel(self, user: discord.Member) -> Tuple[bool, Optional[str]]:

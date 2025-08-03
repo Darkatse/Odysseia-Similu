@@ -64,6 +64,7 @@ class MusicCommands:
         usage_examples = [
             "!music <youtube链接> - 添加YouTube歌曲到队列并开始播放",
             "!music <catbox音频链接> - 添加Catbox音频文件到队列并开始播放",
+            "!music <bilibili链接> - 添加Bilibili视频音频到队列并开始播放",
             "!music queue - 显示当前播放队列",
             "!music now - 显示当前歌曲播放进度",
             "!music my - 查看您的队列状态和预计播放时间",
@@ -75,7 +76,7 @@ class MusicCommands:
         ]
 
         help_text = (
-            "YouTube视频和Catbox音频文件的音乐播放命令。"
+            "YouTube视频、Catbox音频文件和Bilibili视频的音乐播放命令。"
             "使用这些命令前您必须先加入语音频道。"
         )
 
@@ -187,6 +188,8 @@ class MusicCommands:
                 audio_info = await self.music_player.youtube_client.extract_audio_info(url)
             elif source_type and source_type.value == "catbox":
                 audio_info = await self.music_player.catbox_client.extract_audio_info(url)
+            elif source_type and source_type.value == "bilibili":
+                audio_info = await self.music_player.bilibili_client.extract_audio_info(url)
 
             if not audio_info:
                 await self._send_error_embed(response, "错误", "获取歌曲信息失败")
@@ -733,6 +736,7 @@ class MusicCommands:
         commands_text = (
             "`!music <youtube链接>` - 添加YouTube歌曲到队列\n"
             "`!music <catbox音频链接>` - 添加Catbox音频文件到队列\n"
+            "`!music <bilibili链接>` - 添加Bilibili视频音频到队列\n"
             "`!music queue` - 显示当前队列\n"
             "`!music now` - 显示当前歌曲\n"
             "`!music my` - 查看您的队列状态\n"
@@ -750,7 +754,7 @@ class MusicCommands:
 
         embed.add_field(
             name="使用要求",
-            value="• 您必须先加入语音频道\n• 提供有效的YouTube或Catbox音频链接\n• 支持格式: MP3, WAV, OGG, M4A, FLAC, AAC, OPUS, WMA",
+            value="• 您必须先加入语音频道\n• 提供有效的YouTube、Catbox或Bilibili链接\n• 支持格式: MP3, WAV, OGG, M4A, FLAC, AAC, OPUS, WMA",
             inline=False
         )
 
