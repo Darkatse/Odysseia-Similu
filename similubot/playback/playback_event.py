@@ -219,7 +219,7 @@ class PlaybackEvent:
 
             embed = discord.Embed(
                 title="📣 轮到你的歌了",
-                description=f"下首播放: {song.title}",
+                description=f"下下首播放: {song.title}",
                 color=discord.Color.blue()
             )
 

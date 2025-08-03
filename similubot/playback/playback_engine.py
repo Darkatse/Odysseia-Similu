@@ -648,7 +648,7 @@ class PlaybackEngine(IPlaybackEngine):
 
     async def _check_and_notify_next_song(self, guild_id: int) -> None:
         """
-        检查下一首歌曲的点歌人状态并发送通知（如果配置启用）
+        检查下下首歌曲的点歌人状态并发送通知（如果配置启用）
 
         这是一个可配置的功能，允许服务器管理员控制是否向缺席用户发送
         "轮到你的歌了"的提醒通知。
@@ -666,12 +666,13 @@ class PlaybackEngine(IPlaybackEngine):
                 self.logger.debug(f"🔕 缺席用户通知已禁用 - 服务器 {guild_id}")
                 return
 
-            # 查看下一首歌曲（不从队列中移除）- 修复队列同步问题
+            # 查看下下首歌曲（不从队列中移除）- 修复队列同步问题
+            # 如果是原来的下首歌曲会导致没有通知的连锁反应
             queue_manager = self.get_queue_manager(guild_id)
-            next_song = queue_manager.peek_next_song()
+            next_song = queue_manager.peek_next_song(2)  # 获取下下首歌曲
 
             if not next_song:
-                self.logger.debug(f"📭 没有下一首歌曲 - 服务器 {guild_id}")
+                self.logger.debug(f"📭 没有下下首歌曲 - 服务器 {guild_id}")
                 return
 
             # 处理 MockMember（已离开服务器的用户）和真实用户
@@ -701,7 +702,7 @@ class PlaybackEngine(IPlaybackEngine):
                 else:
                     self.logger.warning(f"⚠️ 服务器 {guild_id} 没有设置文本频道，无法发送提醒通知")
             else:
-                self.logger.debug(f"✅ 下一首歌曲的点歌人 {requester_name} 在语音频道中")
+                self.logger.debug(f"✅ 下下首歌曲的点歌人 {next_song.requester.name} 在语音频道中")
 
         except Exception as e:
             self.logger.error(f"❌ 检查下一首歌曲通知时出错 - 服务器 {guild_id}: {e}", exc_info=True)
