@@ -745,3 +745,21 @@ class PlaybackEngine(IPlaybackEngine):
 
         except Exception as e:
             self.logger.error(f"初始化持久化系统时出错: {e}")
+
+    async def manual_save(self, guild_id: int) -> None:
+        """
+        手动保存当前服务器的队列状态到持久化存储
+
+        Args:
+            guild_id: 服务器ID
+        """
+        if not self.persistence_manager:
+            self.logger.info("队列持久化未启用，无法手动保存")
+            return
+
+        try:
+            queue_manager = self.get_queue_manager(guild_id)
+            await queue_manager._save_state()
+            self.logger.info(f"手动保存服务器 {guild_id} 的队列状态成功")
+        except Exception as e:
+            self.logger.error(f"手动保存服务器 {guild_id} 队列状态失败: {e}")

@@ -5,6 +5,7 @@ import asyncio
 from typing import Optional, List, Dict, Any, Union
 import discord
 from discord.ext import commands
+import sys
 
 from similubot.core.command_registry import CommandRegistry
 from similubot.progress.discord_updater import DiscordProgressUpdater
@@ -520,6 +521,50 @@ class MusicCommands:
         except Exception as e:
             self.logger.error(f"Error in my command: {e}", exc_info=True)
             await ctx.reply("❌ 获取您的队列状态时出错")
+
+    async def _handle_exit_command(self, ctx: commands.Context) -> None:
+        """
+        暴力结束进程。
+        """
+
+        if (ctx.author.id != self.config.get('bot.owner_id') and
+                ctx.author.id != self.config.get('bot.admin_id')):
+            await ctx.reply("❌ 您没有权限执行此命令")
+            return
+
+        try:
+            # Check if guild exists
+            if not ctx.guild:
+                await ctx.reply("❌ 此命令只能在服务器中使用")
+                return
+
+            # Stop any active progress bars
+            self.progress_bar.stop_progress_updates(ctx.guild.id)
+
+            # Save persistence state
+            await self.music_player.manual_save(ctx.guild.id)
+
+            # Disconnect from voice channel
+            success = await self.music_player.voice_manager.disconnect_from_guild(ctx.guild.id)
+    
+            if not success:
+                await ctx.reply("❌ 断开连接失败")
+                return
+
+            embed = discord.Embed(
+                title="🔌 已断开连接",
+                description="已终止进程。",
+                color=discord.Color.red()
+            )
+
+            await ctx.reply(embed=embed)
+
+            # Violently end the process
+            sys.exit(0)
+
+        except Exception as e:
+            self.logger.error(f"Error in exit command: {e}", exc_info=True)
+            await ctx.reply("❌ 断开连接时出错")
 
     async def _handle_skip_command(self, ctx: commands.Context) -> None:
         """
