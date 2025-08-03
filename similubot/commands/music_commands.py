@@ -62,71 +62,120 @@ class MusicCommands:
             self.logger.info("Music commands not registered (disabled)")
             return
 
-        usage_examples = [
-            "!music <youtube链接> - 添加YouTube歌曲到队列并开始播放",
-            "!music <catbox音频链接> - 添加Catbox音频文件到队列并开始播放",
-            "!music <bilibili链接> - 添加Bilibili视频音频到队列并开始播放",
-            "!music queue - 显示当前播放队列",
-            "!music now - 显示当前歌曲播放进度",
-            "!music my - 查看您的队列状态和预计播放时间",
-            "!music skip - 跳过当前歌曲",
-            "!music stop - 停止播放并清空队列",
-            "!music jump <数字> - 跳转到队列指定位置",
-            "!music seek <时间> - 跳转到指定时间 (例如: 1:30, +30, -1:00)",
-            "!music status - 显示队列持久化状态"
-        ]
-
-        help_text = (
-            "YouTube视频、Catbox音频文件和Bilibili视频的音乐播放命令。"
-            "使用这些命令前您必须先加入语音频道。"
-        )
-
+        # 1. Play Command (main command for adding songs)
         registry.register_command(
-            name="music",
-            callback=self.music_command,
-            description="音乐播放和队列管理",
+            name="play",
+            aliases=["music", "m"],
+            callback=self.play_command,
+            description="添加歌曲到队列并开始播放",
             required_permission="music",
-            usage_examples=usage_examples,
-            help_text=help_text
+            usage_examples=[
+                "!play <youtube链接>",
+                "!m <catbox链接>",
+                "!music <bilibili链接>"
+            ],
+            help_text="支持YouTube, Catbox, Bilibili链接。使用前需加入语音频道。"
         )
 
-        self.logger.debug("Music commands registered")
+        # 2. Queue Command
+        registry.register_command(
+            name="queue",
+            aliases=["q"],
+            callback=self._handle_queue_command,
+            description="显示当前播放队列",
+            required_permission="music"
+        )
 
-    async def music_command(self, ctx: commands.Context, *args) -> None:
+        # 3. Now Playing Command
+        registry.register_command(
+            name="now",
+            aliases=["np", "current", "playing"],
+            callback=self._handle_now_command,
+            description="显示当前歌曲播放进度",
+            required_permission="music"
+        )
+
+        # 4. My Status Command
+        registry.register_command(
+            name="my",
+            aliases=["mine", "mystatus"],
+            callback=self._handle_my_command,
+            description="查看您的队列状态和预计播放时间",
+            required_permission="music"
+        )
+
+        # 5. Skip Command
+        registry.register_command(
+            name="skip",
+            aliases=["next"],
+            callback=self._handle_skip_command,
+            description="跳过当前歌曲",
+            required_permission="music"
+        )
+
+        # 6. Stop Command
+        registry.register_command(
+            name="stop",
+            aliases=["disconnect", "leave"],
+            callback=self._handle_stop_command,
+            description="停止播放并清空队列",
+            required_permission="music"
+        )
+
+        # 7. Jump Command
+        registry.register_command(
+            name="jump",
+            aliases=["goto"],
+            callback=self.jump_command,
+            description="跳转到队列指定位置",
+            required_permission="music",
+            usage_examples=["!jump 5"]
+        )
+
+        # 8. Seek Command
+        registry.register_command(
+            name="seek",
+            callback=self.seek_command,
+            description="跳转到指定时间",
+            required_permission="music",
+            usage_examples=["!seek 1:30", "!seek +30"]
+        )
+
+        # 9. Persistence Status Command
+        registry.register_command(
+            name="status",
+            aliases=["persistence", "persist"],
+            callback=self.persistence_status,
+            description="显示队列持久化状态",
+            required_permission="music"
+        )
+
+        self.logger.debug("All music commands registered as top-level commands.")
+
+    async def play_command(self, ctx: commands.Context, *, url: str) -> None:
         """
-        Main music command handler.
-
-        Args:
-            ctx: Discord command context
-            *args: Command arguments
+        Handles the play command, which now accepts a URL directly.
+        This is the primary command for adding songs.
         """
-        if not args:
-            await self._show_music_help(ctx)
-            return
-
-        subcommand = args[0]
-
-        if subcommand in ["queue", "q"]:
-            await self._handle_queue_command(ctx)
-        elif subcommand in ["now", "current", "playing"]:
-            await self._handle_now_command(ctx)
-        elif subcommand in ["my", "mine", "mystatus"]:
-            await self._handle_my_command(ctx)
-        elif subcommand in ["skip", "next"]:
-            await self._handle_skip_command(ctx)
-        elif subcommand in ["stop", "disconnect", "leave"]:
-            await self._handle_stop_command(ctx)
-        elif subcommand in ["jump", "goto"]:
-            await self._handle_jump_command(ctx, list(args[1:]))
-        elif subcommand in ["seek", "goto_time"]:
-            await self._handle_seek_command(ctx, list(args[1:]))
-        elif subcommand in ["persistence", "persist", "status"]:
-            await self.persistence_status(ctx)
-        elif self.music_player.is_supported_url(subcommand):
-            # First argument is a supported audio URL (YouTube or Catbox)
-            await self._handle_play_command(ctx, subcommand)
+        if self.music_player.is_supported_url(url):
+            await self._handle_play_command(ctx, url)
         else:
-            await self._show_music_help(ctx)
+            await ctx.reply("❌ 无效的链接。请输入一个有效的 YouTube, Catbox 或 Bilibili 链接。")
+
+    async def jump_command(self, ctx: commands.Context, position: int) -> None:
+        """
+        Handles the jump command with automatic type conversion.
+        """
+        await self._handle_jump_command(ctx, position)
+
+    async def seek_command(self, ctx: commands.Context, *, time_str: Optional[str] = None) -> None:
+        """
+        Handles the seek command. Shows help if no time is provided.
+        """
+        if not time_str:
+            await self._show_seek_help(ctx)
+            return
+        await self._handle_seek_command(ctx, time_str)
 
     async def _handle_play_command(self, ctx: commands.Context, url: str) -> None:
         """
@@ -634,25 +683,20 @@ class MusicCommands:
             self.logger.error(f"Error in stop command: {e}", exc_info=True)
             await ctx.reply("❌ 停止播放时出错")
 
-    async def _handle_jump_command(self, ctx: commands.Context, args: List[str]) -> None:
+    async def _handle_jump_command(self, ctx: commands.Context, position: int) -> None:
         """
         Handle jump command.
 
         Args:
             ctx: Discord command context
-            args: Command arguments
+            position: Target queue position (converted by discord.py)
         """
-        if not args:
-            await ctx.reply("❌ Please specify a queue position number")
-            return
-
         try:
             # Check if guild exists
             if not ctx.guild:
                 await ctx.reply("❌ 此命令只能在服务器中使用")
                 return
 
-            position = int(args[0])
             if position < 1:
                 await ctx.reply("❌ 队列位置必须大于等于1")
                 return
@@ -676,58 +720,25 @@ class MusicCommands:
 
             await ctx.reply(embed=embed)
 
-        except ValueError:
-            await ctx.reply("❌ 无效的位置数字")
+        except commands.BadArgument:
+            await ctx.reply("❌ 无效的位置数字。请输入一个整数。")
         except Exception as e:
             self.logger.error(f"Error in jump command: {e}", exc_info=True)
             await ctx.reply("❌ 跳转到指定位置时出错")
 
-    async def _handle_seek_command(self, ctx: commands.Context, args: List[str]) -> None:
+    async def _handle_seek_command(self, ctx: commands.Context, time_str: str) -> None:
         """
         Handle seek command.
 
         Args:
             ctx: Discord command context
-            args: Command arguments
+            time_str: Time string for seeking (e.g., "1:30", "+30")
         """
-        if not args:
-            # Show seek command help
-            embed = discord.Embed(
-                title="🎯 定位命令帮助",
-                description="跳转到当前播放歌曲的指定位置",
-                color=discord.Color.blue()
-            )
-
-            examples = self.music_player.seek_manager.get_seek_examples()
-            examples_text = "\n".join(examples)
-
-            embed.add_field(
-                name="使用示例",
-                value=examples_text,
-                inline=False
-            )
-
-            embed.add_field(
-                name="支持的格式",
-                value="• `mm:ss` - 跳转到绝对位置\n"
-                      "• `hh:mm:ss` - 跳转到绝对位置（包含小时）\n"
-                      "• `+mm:ss` - 相对当前位置向前跳转\n"
-                      "• `-mm:ss` - 相对当前位置向后跳转\n"
-                      "• `+秒数` - 向前跳转指定秒数\n"
-                      "• `-秒数` - 向后跳转指定秒数",
-                inline=False
-            )
-
-            await ctx.reply(embed=embed)
-            return
-
         try:
             # Check if guild exists
             if not ctx.guild:
                 await ctx.reply("❌ 此命令只能在服务器中使用")
                 return
-
-            time_str = args[0]
 
             # Perform seek operation
             success, error = await self.music_player.seek_to_position(ctx.guild.id, time_str)
@@ -765,41 +776,33 @@ class MusicCommands:
             self.logger.error(f"Error in seek command: {e}", exc_info=True)
             await ctx.reply("❌ 跳转到指定位置时出错")
 
-    async def _show_music_help(self, ctx: commands.Context) -> None:
+    async def _show_seek_help(self, ctx: commands.Context) -> None:
         """
-        显示音乐命令帮助。
-
-        Args:
-            ctx: Discord 命令上下文
+        Shows help for the seek command.
         """
         embed = discord.Embed(
-            title="🎵 音乐命令",
-            description="音乐播放和队列管理命令",
+            title="🎯 定位命令帮助 (`!seek`)",
+            description="跳转到当前播放歌曲的指定位置。",
             color=discord.Color.blue()
         )
 
-        commands_text = (
-            "`!music <youtube链接>` - 添加YouTube歌曲到队列\n"
-            "`!music <catbox音频链接>` - 添加Catbox音频文件到队列\n"
-            "`!music <bilibili链接>` - 添加Bilibili视频音频到队列\n"
-            "`!music queue` - 显示当前队列\n"
-            "`!music now` - 显示当前歌曲\n"
-            "`!music my` - 查看您的队列状态\n"
-            "`!music skip` - 跳过当前歌曲\n"
-            "`!music stop` - 停止播放并清空队列\n"
-            "`!music jump <数字>` - 跳转到指定位置\n"
-            "`!music seek <时间>` - 跳转到指定时间 (例如: 1:30, +30, -1:00)"
-        )
+        examples = self.music_player.seek_manager.get_seek_examples()
+        examples_text = "\n".join(f"`{ex}`" for ex in examples)
 
         embed.add_field(
-            name="可用命令",
-            value=commands_text,
+            name="使用示例",
+            value=examples_text,
             inline=False
         )
 
         embed.add_field(
-            name="使用要求",
-            value="• 您必须先加入语音频道\n• 提供有效的YouTube、Catbox或Bilibili链接\n• 支持格式: MP3, WAV, OGG, M4A, FLAC, AAC, OPUS, WMA",
+            name="支持的格式",
+            value="• `mm:ss` - 跳转到绝对位置\n"
+                  "• `hh:mm:ss` - 跳转到绝对位置（包含小时）\n"
+                  "• `+mm:ss` - 相对当前位置向前跳转\n"
+                  "• `-mm:ss` - 相对当前位置向后跳转\n"
+                  "• `+秒数` - 向前跳转指定秒数\n"
+                  "• `-秒数` - 向后跳转指定秒数",
             inline=False
         )
 

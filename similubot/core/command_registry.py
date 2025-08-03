@@ -13,6 +13,7 @@ class CommandInfo:
     name: str
     callback: Callable
     description: str
+    aliases: Optional[List[str]] = None
     required_permission: Optional[str] = None
     admin_only: bool = False
     usage_examples: Optional[List[str]] = None
@@ -46,6 +47,7 @@ class CommandRegistry:
         name: str,
         callback: Callable,
         description: str,
+        aliases: Optional[List[str]] = None,
         required_permission: Optional[str] = None,
         admin_only: bool = False,
         usage_examples: Optional[List[str]] = None,
@@ -58,6 +60,7 @@ class CommandRegistry:
             name: Command name
             callback: Command callback function
             description: Command description
+            aliases: Command aliases
             required_permission: Required permission (command name or feature name)
             admin_only: Whether command requires admin privileges
             usage_examples: List of usage examples for help display
@@ -67,6 +70,7 @@ class CommandRegistry:
             name=name,
             callback=callback,
             description=description,
+            aliases=aliases,
             required_permission=required_permission,
             admin_only=admin_only,
             usage_examples=usage_examples,
@@ -79,10 +83,10 @@ class CommandRegistry:
         wrapped_callback = self._wrap_command_simple(command_info)
 
         # Register with Discord.py
-        command = commands.Command(wrapped_callback, name=name, help=description)
+        command = commands.Command(wrapped_callback, name=name, help=description, aliases=aliases or [])
         self.bot.add_command(command)
 
-        self.logger.debug(f"注册命令: {name}")
+        self.logger.debug(f"注册命令: {name} (别名: {aliases})")
 
     def register_command_group(
         self,
