@@ -244,6 +244,7 @@ class PlaybackEvent:
             channel = bot.get_channel(channel_id)
             if channel:
                 await channel.send(embed=embed)
+                await channel.send(content=f"{song.requester.mention}, 要轮到你的歌了！请准备好。")
                 self.logger.info(f"✅ 轮到你的歌通知发送成功 - {song.title}")
             else:
                 self.logger.warning(f"❌ 频道 {channel_id} 不存在，无法发送通知")
