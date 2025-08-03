@@ -257,6 +257,20 @@ class QueueManager(IQueueManager):
 
             return position
     
+    def peek_next_song(self) -> Optional[SongInfo]:
+        """
+        查看下一首歌曲但不从队列中移除
+
+        这个方法用于预览下一首歌曲，不会修改队列状态。
+        主要用于检查下一首歌曲的点歌人状态等场景。
+
+        Returns:
+            下一首歌曲，如果队列为空则返回None
+        """
+        if not self._queue:
+            return None
+        return self._queue[0]
+
     async def get_next_song(self) -> Optional[SongInfo]:
         """
         从队列获取下一首歌曲
@@ -434,7 +448,7 @@ class QueueManager(IQueueManager):
             歌曲列表
         """
         end = min(start + limit, len(self._queue))
-        return self._queue[start:end]
+        return [song for song in self._queue[start:end]]  # Convert Song to SongInfo
 
     async def get_queue_display(self, max_songs: int = 10) -> List[Dict[str, Any]]:
         """
@@ -578,11 +592,12 @@ class QueueManager(IQueueManager):
         Returns:
             包含统计信息的字典
         """
+        currently_playing_user = self._duplicate_detector.get_currently_playing_user()
         return {
             'total_tracked_songs': self._duplicate_detector.get_total_tracked_songs(),
             'total_users_with_songs': len(self._duplicate_detector._user_songs),
             'total_users_with_pending': len(self._duplicate_detector._user_pending_songs),
-            'currently_playing_user': self._duplicate_detector.get_currently_playing_user()
+            'currently_playing_user': currently_playing_user if currently_playing_user is not None else 0
         }
 
     def get_user_queue_status(self, user: discord.Member) -> Dict[str, Any]:

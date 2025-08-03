@@ -470,8 +470,8 @@ class PlaybackEngine(IPlaybackEngine):
             queue_manager = self.get_queue_manager(guild_id)
             
             while True:
-
-                # 获取下一首歌曲
+                # 获取下一首歌曲 - 这里正确使用 get_next_song 来实际推进队列
+                # 注意：只有在这里才应该调用 get_next_song，其他地方应该使用 peek_next_song
                 song = await queue_manager.get_next_song()
                 if not song:
                     break  # 队列为空
@@ -659,13 +659,15 @@ class PlaybackEngine(IPlaybackEngine):
                 self.logger.debug(f"🔕 缺席用户通知已禁用 - 服务器 {guild_id}")
                 return
 
-            # 获取下一首歌曲
+            # 查看下一首歌曲（不从队列中移除）- 修复队列同步问题
             queue_manager = self.get_queue_manager(guild_id)
-            next_song = await queue_manager.get_next_song()
+            next_song = queue_manager.peek_next_song()
 
             if not next_song:
                 self.logger.debug(f"📭 没有下一首歌曲 - 服务器 {guild_id}")
                 return
+
+            self.logger.debug(f"🔍 检查下一首歌曲的点歌人状态: {next_song.title} - {next_song.requester.name}")
 
             # 检查下一首歌曲的点歌人是否在语音频道
             if not next_song.requester.voice or not next_song.requester.voice.channel:

@@ -212,3 +212,4 @@ config/config.yaml
 # Temp file
 temp/
 data/
+reference/
