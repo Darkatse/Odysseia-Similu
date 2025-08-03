@@ -87,6 +87,48 @@ class PlaybackEngine(IPlaybackEngine):
         
         return self._queue_managers[guild_id]
     
+    # 事件处理器 (Dict [str, List[callable]])
+
+    _event_handlers = {
+        "song_requester_absent_skip": [], # 跳过点歌人不在语音频道的歌曲
+        "show_song_info": [], # 歌曲信息
+        "your_song_notification": [], # 要轮到你的歌了！
+    }
+    
+    def add_event_handler(self, event_type: str, handler: callable) -> None:
+        """
+        添加播放事件处理器
+        
+        Args:
+            event_type: 事件类型
+            handler: 事件处理函数
+        """
+
+        if event_type in self._event_handlers:
+            self._event_handlers[event_type].append(handler)
+            self.logger.debug(f"添加事件处理器: {event_type}")
+        else:
+            self.logger.warning(f"未知事件类型: {event_type}")
+
+    async def _trigger_event(self, event_type: str, **kwargs) -> None:
+        """
+        触发播放事件
+        
+        Args:
+            event_type: 事件类型
+            *args: 事件参数
+            **kwargs: 事件关键字参数
+        """
+        if event_type in self._event_handlers:
+            for handler in self._event_handlers[event_type]:
+                try:
+                    kwargs['bot'] = self.bot  # 确保bot实例传递给处理器
+                    await handler(**kwargs)
+                except Exception as e:
+                    self.logger.error(f"事件处理器 {handler.__name__} 处理 {event_type} 时出错: {e}")
+        else:
+            self.logger.warning(f"未知事件类型: {event_type}")     
+
     async def add_song_to_queue(
         self, 
         url: str, 
@@ -402,24 +444,33 @@ class PlaybackEngine(IPlaybackEngine):
             queue_manager = self.get_queue_manager(guild_id)
             
             while True:
+
                 # 获取下一首歌曲
                 song = await queue_manager.get_next_song()
                 if not song:
                     break  # 队列为空
                 
+                # 检查添加歌曲至队列的用户是否仍在语音频道，不在则跳过
+                if not song.requester.voice.channel or not song.requester.voice:
+                    self.logger.info(f"点歌人 {song.requester.name} 不在语音频道，跳过歌曲: {song.title}")
+                    asyncio.create_task(
+                        self._trigger_event("song_requester_absent_skip", guild_id=guild_id, channel_id=self.voice_manager.get_connection_info(guild_id)["channel"], song=song)
+                    )
+                    continue
+
                 # 下载音频文件
                 success, audio_info, error = await self.audio_provider_factory.download_audio(song.url)
                 if not success or not audio_info:
                     self.logger.error(f"下载音频失败 - {song.title}: {error}")
                     continue
-                
+
                 # 播放音频
                 if audio_info.file_path and os.path.exists(audio_info.file_path):
                     await self._play_audio_file(guild_id, audio_info.file_path, song)
                 else:
                     # 直接播放URL（如Catbox）
                     await self._play_audio_url(guild_id, song.url, song)
-                
+
         except Exception as e:
             self.logger.error(f"播放循环出错 - 服务器 {guild_id}: {e}")
         finally:
@@ -498,6 +549,18 @@ class PlaybackEngine(IPlaybackEngine):
             self._total_paused_duration[guild_id] = 0.0
             if guild_id in self._playback_paused_times:
                 del self._playback_paused_times[guild_id]
+
+            # 输出正在播放的歌曲信息
+            asyncio.create_task(
+                self._trigger_event("show_song_info", guild_id=guild_id, channel_id=self.voice_manager.get_connection_info(guild_id)["channel"], song=song)
+            )
+
+            # 输出轮到你的歌的通知
+            next_song = await self.get_queue_manager(guild_id).get_next_song()
+            if next_song and (not next_song.requester.voice.channel or not next_song.requester.voice): # TA疑似跑路了
+                asyncio.create_task(
+                    self._trigger_event("your_song_notification", guild_id=guild_id, channel_id=self.voice_manager.get_connection_info(guild_id)["channel"], song=next_song)
+                )
 
             self.logger.info(f"正在播放: {song.title}")
 
