@@ -12,6 +12,8 @@ from similubot.progress.discord_updater import DiscordProgressUpdater
 from similubot.progress.music_progress import MusicProgressBar
 from similubot.utils.config_manager import ConfigManager
 from similubot.queue.user_queue_status import UserQueueStatusService
+from similubot.utils.netease_search import search_songs, get_playback_url
+from similubot.ui.button_interactions import InteractionManager, InteractionResult
 
 
 class MusicCommands:
@@ -36,6 +38,9 @@ class MusicCommands:
 
         # Initialize progress bar
         self.progress_bar = MusicProgressBar(music_player)
+
+        # Initialize interaction manager for NetEase search
+        self.interaction_manager = InteractionManager()
 
         # Check if music functionality is enabled
         self._enabled = config.get('music.enabled', True)
@@ -63,9 +68,12 @@ class MusicCommands:
             return
 
         usage_examples = [
+            "!music <搜索关键词> - 搜索并添加网易云音乐歌曲到队列（默认行为）",
             "!music <youtube链接> - 添加YouTube歌曲到队列并开始播放",
             "!music <catbox音频链接> - 添加Catbox音频文件到队列并开始播放",
             "!music <bilibili链接> - 添加Bilibili视频音频到队列并开始播放",
+            "!music <netease链接> - 添加网易云音乐歌曲到队列并开始播放",
+            "!music netease <搜索关键词> - 明确指定网易云音乐搜索（与默认行为相同）",
             "!music queue - 显示当前播放队列",
             "!music now - 显示当前歌曲播放进度",
             "!music my - 查看您的队列状态和预计播放时间",
@@ -77,8 +85,8 @@ class MusicCommands:
         ]
 
         help_text = (
-            "YouTube视频、Catbox音频文件和Bilibili视频的音乐播放命令。"
-            "使用这些命令前您必须先加入语音频道。"
+            "音乐播放和队列管理命令。支持网易云音乐搜索（默认）、YouTube视频、Catbox音频文件、Bilibili视频和网易云音乐链接。"
+            "使用这些命令前您必须先加入语音频道。直接输入搜索关键词将自动在网易云音乐中搜索。"
         )
 
         registry.register_command(
@@ -122,11 +130,17 @@ class MusicCommands:
             await self._handle_seek_command(ctx, list(args[1:]))
         elif subcommand in ["persistence", "persist", "status"]:
             await self.persistence_status(ctx)
+        elif subcommand in ["netease", "ne", "网易", "网易云"]:
+            await self._handle_netease_command(ctx, list(args[1:]))
         elif self.music_player.is_supported_url(subcommand):
-            # First argument is a supported audio URL (YouTube or Catbox)
+            # First argument is a supported audio URL (YouTube, Catbox, Bilibili, or NetEase)
             await self._handle_play_command(ctx, subcommand)
         else:
-            await self._show_music_help(ctx)
+            # Default behavior: treat as NetEase search query
+            # Join all arguments to form the complete search query
+            search_query = " ".join(args)
+            self.logger.debug(f"默认NetEase搜索: {search_query}")
+            await self._handle_netease_command(ctx, args)
 
     async def _handle_play_command(self, ctx: commands.Context, url: str) -> None:
         """
@@ -170,17 +184,8 @@ class MusicCommands:
             )
 
             if not success:
-                # Check the type of error and provide appropriate feedback
-                if error and "已经请求了这首歌曲" in error:
-                    await self._send_duplicate_song_embed(response, error)
-                elif error and ("已经有" in error and "首歌曲在队列中" in error):
-                    await self._send_queue_fairness_embed(response, error, ctx.author)
-                elif error and "正在播放中" in error:
-                    await self._send_currently_playing_embed(response, error)
-                elif error and "歌曲时长" in error and "超过了最大限制" in error:
-                    await self._send_song_too_long_embed(response, error)
-                else:
-                    await self._send_error_embed(response, "添加歌曲失败", error or "未知错误")
+                # 使用统一的错误处理方法
+                await self._handle_queue_addition_error(response, error, ctx.author)
                 return
 
             # Get audio info for the added song based on source type
@@ -779,9 +784,12 @@ class MusicCommands:
         )
 
         commands_text = (
+            "`!music <搜索关键词>` - 搜索并添加网易云音乐歌曲（默认行为）\n"
             "`!music <youtube链接>` - 添加YouTube歌曲到队列\n"
             "`!music <catbox音频链接>` - 添加Catbox音频文件到队列\n"
             "`!music <bilibili链接>` - 添加Bilibili视频音频到队列\n"
+            "`!music <netease链接>` - 添加网易云音乐歌曲到队列\n"
+            "`!music netease <搜索关键词>` - 明确指定网易云音乐搜索\n"
             "`!music queue` - 显示当前队列\n"
             "`!music now` - 显示当前歌曲\n"
             "`!music my` - 查看您的队列状态\n"
@@ -799,7 +807,13 @@ class MusicCommands:
 
         embed.add_field(
             name="使用要求",
-            value="• 您必须先加入语音频道\n• 提供有效的YouTube、Catbox或Bilibili链接\n• 支持格式: MP3, WAV, OGG, M4A, FLAC, AAC, OPUS, WMA",
+            value="• 您必须先加入语音频道\n• 直接输入搜索关键词将自动在网易云音乐中搜索\n• 也可提供YouTube、Catbox、Bilibili或网易云音乐链接\n• 支持格式: MP3, WAV, OGG, M4A, FLAC, AAC, OPUS, WMA",
+            inline=False
+        )
+
+        embed.add_field(
+            name="使用示例",
+            value="`!music 初音未来` - 搜索初音未来的歌曲\n`!music 周杰伦 青花瓷` - 搜索周杰伦的青花瓷\n`!music https://youtu.be/abc123` - 添加YouTube视频\n`!music queue` - 查看播放队列",
             inline=False
         )
 
@@ -1041,6 +1055,430 @@ class MusicCommands:
         except Exception as e:
             self.logger.error(f"获取持久化状态失败: {e}")
             await ctx.send("❌ 获取持久化状态时发生错误")
+
+    async def _handle_netease_command(self, ctx: commands.Context, args: list) -> None:
+        """
+        处理网易云音乐搜索命令
+
+        Args:
+            ctx: Discord命令上下文
+            args: 搜索关键词参数列表
+        """
+        try:
+            # 检查用户是否在语音频道
+            if not ctx.author.voice or not ctx.author.voice.channel:
+                embed = discord.Embed(
+                    title="❌ 错误",
+                    description="您需要先加入语音频道才能使用音乐命令",
+                    color=discord.Color.red()
+                )
+                await ctx.send(embed=embed)
+                return
+
+            # 检查是否提供了搜索关键词
+            if not args:
+                embed = discord.Embed(
+                    title="❌ 错误",
+                    description="请提供搜索关键词\n例如: `!music netease 初音未来`",
+                    color=discord.Color.red()
+                )
+                await ctx.send(embed=embed)
+                return
+
+            # 合并搜索关键词
+            search_query = " ".join(args)
+            self.logger.debug(f"用户 {ctx.author.display_name} 搜索网易云音乐: {search_query}")
+
+            # 显示搜索中的消息
+            searching_embed = discord.Embed(
+                title="🔍 搜索中...",
+                description=f"正在网易云音乐中搜索: **{search_query}**",
+                color=discord.Color.blue()
+            )
+            searching_message = await ctx.send(embed=searching_embed)
+
+            # 执行搜索
+            search_results = await search_songs(search_query, limit=5)
+
+            # 删除搜索中的消息
+            try:
+                await searching_message.delete()
+            except:
+                pass  # 忽略删除失败
+
+            if not search_results:
+                embed = discord.Embed(
+                    title="❌ 未找到结果",
+                    description=f"未找到与 **{search_query}** 相关的歌曲",
+                    color=discord.Color.orange()
+                )
+                await ctx.send(embed=embed)
+                return
+
+            # 显示第一个结果的确认界面
+            first_result = search_results[0]
+            interaction_result, selected_result = await self.interaction_manager.show_search_confirmation(
+                ctx, first_result, timeout=60.0
+            )
+
+            if interaction_result == InteractionResult.CONFIRMED and selected_result:
+                # 用户确认了第一个结果，添加到队列
+                await self._add_netease_song_to_queue(ctx, selected_result)
+
+            elif interaction_result == InteractionResult.DENIED:
+                # 用户拒绝了第一个结果，显示更多选择
+                if len(search_results) > 1:
+                    interaction_result, selected_result = await self.interaction_manager.show_search_selection(
+                        ctx, search_results, timeout=60.0
+                    )
+
+                    if interaction_result == InteractionResult.SELECTED and selected_result:
+                        # 用户选择了一个结果，添加到队列
+                        await self._add_netease_song_to_queue(ctx, selected_result)
+                    elif interaction_result == InteractionResult.CANCELLED:
+                        # 用户取消了选择
+                        self.logger.debug(f"用户 {ctx.author.display_name} 取消了网易云音乐搜索")
+                    elif interaction_result == InteractionResult.TIMEOUT:
+                        # 选择超时
+                        self.logger.debug(f"用户 {ctx.author.display_name} 的网易云音乐选择超时")
+                else:
+                    # 只有一个结果但被拒绝
+                    embed = discord.Embed(
+                        title="❌ 已取消",
+                        description="搜索已取消",
+                        color=discord.Color.light_grey()
+                    )
+                    await ctx.send(embed=embed)
+
+            elif interaction_result == InteractionResult.TIMEOUT:
+                # 确认超时
+                self.logger.debug(f"用户 {ctx.author.display_name} 的网易云音乐确认超时")
+
+        except Exception as e:
+            self.logger.error(f"处理网易云音乐命令时出错: {e}", exc_info=True)
+            embed = discord.Embed(
+                title="❌ 错误",
+                description="处理网易云音乐搜索时发生错误",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+
+    async def _add_netease_song_to_queue(self, ctx: commands.Context, search_result) -> None:
+        """
+        将网易云音乐歌曲添加到队列
+
+        Args:
+            ctx: Discord命令上下文
+            search_result: 网易云搜索结果
+        """
+        try:
+            # 构建网易云音乐播放URL
+            playback_url = get_playback_url(search_result.song_id, use_api=True)
+
+            self.logger.debug(f"添加网易云歌曲到队列: {search_result.get_display_name()} - URL: {playback_url}")
+
+            # 创建进度更新器
+            progress_updater = DiscordProgressUpdater(ctx)
+
+            # 连接到用户的语音频道
+            success, error = await self.music_player.connect_to_user_channel(ctx.author)
+            if not success:
+                embed = discord.Embed(
+                    title="❌ 连接失败",
+                    description=f"无法连接到语音频道: {error}",
+                    color=discord.Color.red()
+                )
+                await ctx.send(embed=embed)
+                return
+
+            # 添加歌曲到队列
+            success, position, error = await self.music_player.add_song_to_queue(
+                playback_url, ctx.author, progress_updater
+            )
+
+            if success:
+                # 成功添加到队列
+                embed = discord.Embed(
+                    title="✅ 已添加到队列",
+                    description=f"**{search_result.get_display_name()}**",
+                    color=discord.Color.green()
+                )
+
+                if position:
+                    embed.add_field(
+                        name="队列位置",
+                        value=f"第 {position} 位",
+                        inline=True
+                    )
+
+                if search_result.duration:
+                    embed.add_field(
+                        name="时长",
+                        value=search_result.format_duration(),
+                        inline=True
+                    )
+
+                if search_result.cover_url:
+                    embed.set_thumbnail(url=search_result.cover_url)
+
+                await ctx.send(embed=embed)
+
+                self.logger.info(f"成功添加网易云歌曲: {search_result.get_display_name()} (位置: {position})")
+
+            else:
+                # 添加失败，处理各种错误情况
+                await self._handle_queue_addition_error(ctx, error, ctx.author)
+
+        except Exception as e:
+            self.logger.error(f"添加网易云歌曲到队列时出错: {e}", exc_info=True)
+            embed = discord.Embed(
+                title="❌ 添加失败",
+                description="添加歌曲到队列时发生错误",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+
+    async def _handle_queue_addition_error(
+        self,
+        message_or_ctx,
+        error_msg: str,
+        user: Optional[Union[discord.User, discord.Member]] = None
+    ) -> None:
+        """
+        统一处理队列添加错误的方法
+
+        Args:
+            message_or_ctx: Discord消息对象或命令上下文
+            error_msg: 错误消息
+            user: 触发错误的用户（可选）
+        """
+        try:
+            # 检测对象类型并选择合适的错误处理方法
+            # Context对象有send方法但没有edit方法，Message对象有edit方法但没有send方法
+            is_context = hasattr(message_or_ctx, 'send') and not hasattr(message_or_ctx, 'edit')
+
+            # 根据错误类型调用相应的专用错误处理方法
+            if error_msg and "已经请求了这首歌曲" in error_msg:
+                if is_context:
+                    await self._send_duplicate_song_embed_ctx(message_or_ctx, error_msg)
+                else:
+                    await self._send_duplicate_song_embed(message_or_ctx, error_msg)
+            elif error_msg and ("已经有" in error_msg and "首歌曲在队列中" in error_msg):
+                # 确保user不为None
+                if user is None:
+                    self.logger.warning("队列公平性错误但用户为None")
+                    # 尝试从消息或上下文中获取用户
+                    user = getattr(message_or_ctx, 'author', None)
+                if user is not None:
+                    if is_context:
+                        await self._send_queue_fairness_embed_ctx(message_or_ctx, error_msg, user)
+                    else:
+                        await self._send_queue_fairness_embed(message_or_ctx, error_msg, user)
+                else:
+                    if is_context:
+                        await self._send_error_embed_ctx(message_or_ctx, "队列限制", error_msg)
+                    else:
+                        await self._send_error_embed(message_or_ctx, "队列限制", error_msg)
+            elif error_msg and "正在播放中" in error_msg:
+                if is_context:
+                    await self._send_currently_playing_embed_ctx(message_or_ctx, error_msg)
+                else:
+                    await self._send_currently_playing_embed(message_or_ctx, error_msg)
+            elif error_msg and "歌曲时长" in error_msg and "超过了最大限制" in error_msg:
+                if is_context:
+                    await self._send_song_too_long_embed_ctx(message_or_ctx, error_msg)
+                else:
+                    await self._send_song_too_long_embed(message_or_ctx, error_msg)
+            else:
+                if is_context:
+                    await self._send_error_embed_ctx(message_or_ctx, "添加歌曲失败", error_msg or "未知错误")
+                else:
+                    await self._send_error_embed(message_or_ctx, "添加歌曲失败", error_msg or "未知错误")
+
+        except Exception as e:
+            self.logger.error(f"处理队列错误时出错: {e}", exc_info=True)
+
+    # Context-aware error handling methods (for NetEase integration)
+    async def _send_error_embed_ctx(
+        self,
+        ctx: commands.Context,
+        title: str,
+        description: str
+    ) -> None:
+        """
+        Send an error embed using Context (for NetEase integration).
+
+        Args:
+            ctx: Discord command context
+            title: Error title
+            description: Error description
+        """
+        embed = discord.Embed(
+            title=f"❌ {title}",
+            description=description,
+            color=discord.Color.red()
+        )
+
+        await ctx.send(embed=embed)
+
+    async def _send_duplicate_song_embed_ctx(self, ctx: commands.Context, error_message: str) -> None:
+        """
+        Send duplicate song error embed using Context.
+
+        Args:
+            ctx: Discord command context
+            error_message: Duplicate error message
+        """
+        embed = discord.Embed(
+            title="🔄 重复歌曲",
+            description=error_message,
+            color=discord.Color.orange()
+        )
+        embed.add_field(
+            name="💡 提示",
+            value="等待当前歌曲播放完成后，您就可以再次请求这首歌曲了。",
+            inline=False
+        )
+        await ctx.send(embed=embed)
+
+    async def _send_queue_fairness_embed_ctx(self, ctx: commands.Context, error_message: str, user: Union[discord.User, discord.Member]) -> None:
+        """
+        发送队列公平性错误嵌入消息，使用Context对象
+
+        Args:
+            ctx: Discord命令上下文
+            error_message: 队列公平性错误消息
+            user: 触发错误的用户
+        """
+        embed = discord.Embed(
+            title="⚖️ 队列公平性限制",
+            description="您已经有歌曲在队列中，请等待播放完成后再添加新歌曲。",
+            color=discord.Color.orange()
+        )
+
+        embed.add_field(
+            name="📋 队列规则",
+            value="为了保证所有用户的公平使用，每位用户同时只能有一首歌曲在队列中等待播放。",
+            inline=False
+        )
+
+        # 尝试获取用户的详细队列状态信息
+        try:
+            # 显示用户特定的队列状态（仅对成员用户）
+            if hasattr(self.music_player, '_playback_engine') and ctx.guild and isinstance(user, discord.Member):
+                from similubot.queue.user_queue_status import UserQueueStatusService
+                user_queue_service = UserQueueStatusService(self.music_player._playback_engine)
+
+                # 获取用户的详细队列信息
+                user_info = user_queue_service.get_user_queue_info(user, ctx.guild.id)
+
+                if user_info.has_queued_song:
+                    if user_info.is_currently_playing:
+                        embed.add_field(
+                            name="🎶 您的歌曲状态",
+                            value=f"**{user_info.queued_song_title}** 正在播放中",
+                            inline=False
+                        )
+                    else:
+                        status_text = f"**{user_info.queued_song_title}**"
+                        if user_info.queue_position:
+                            status_text += f"\n📍 队列位置: 第 {user_info.queue_position} 位"
+                        if user_info.estimated_play_time_seconds is not None:
+                            status_text += f"\n⏰ 预计播放时间: {user_info.format_estimated_time()} 后"
+
+                        embed.add_field(
+                            name="🎶 您的排队歌曲",
+                            value=status_text,
+                            inline=False
+                        )
+
+            # 显示通用队列状态（对所有用户）
+            if ctx.guild:
+                queue_info = await self.music_player.get_queue_info(ctx.guild.id)
+                if queue_info:
+                    embed.add_field(
+                        name="📊 当前队列状态",
+                        value=f"队列长度: {queue_info.get('queue_length', 0)} 首歌曲",
+                        inline=True
+                    )
+
+        except Exception as e:
+            self.logger.debug(f"获取详细队列状态信息失败: {e}")
+            # 如果获取详细信息失败，显示基本信息
+            try:
+                if hasattr(self.music_player, 'get_queue_info') and ctx.guild:
+                    queue_info = await self.music_player.get_queue_info(ctx.guild.id)
+                    if queue_info:
+                        embed.add_field(
+                            name="📊 当前队列状态",
+                            value=f"队列长度: {queue_info.get('queue_length', 0)} 首歌曲",
+                            inline=True
+                        )
+            except Exception:
+                pass  # 忽略获取队列信息的错误
+
+        embed.add_field(
+            name="💡 建议",
+            value="使用 `!music my` 命令查看您当前的队列状态和预计播放时间。",
+            inline=False
+        )
+
+        await ctx.send(embed=embed)
+
+    async def _send_currently_playing_embed_ctx(self, ctx: commands.Context, error_message: str) -> None:
+        """
+        Send currently playing error embed using Context.
+
+        Args:
+            ctx: Discord command context
+            error_message: Currently playing error message
+        """
+        embed = discord.Embed(
+            title="🎵 歌曲正在播放",
+            description=error_message,
+            color=discord.Color.blue()
+        )
+        embed.add_field(
+            name="🎧 当前状态",
+            value="您的歌曲正在播放中，请耐心等待播放完成。",
+            inline=False
+        )
+        embed.add_field(
+            name="⏭️ 下一步",
+            value="歌曲播放完成后，您就可以添加新的歌曲了。",
+            inline=False
+        )
+        await ctx.send(embed=embed)
+
+    async def _send_song_too_long_embed_ctx(self, ctx: commands.Context, error_message: str) -> None:
+        """
+        Send song too long error embed using Context.
+
+        Args:
+            ctx: Discord command context
+            error_message: Song too long error message
+        """
+        embed = discord.Embed(
+            title="⏱️ 歌曲时长超限",
+            description=error_message,
+            color=discord.Color.red()
+        )
+        embed.add_field(
+            name="📏 时长限制说明",
+            value="为了确保队列的流畅性和公平性，系统限制了单首歌曲的最大时长。",
+            inline=False
+        )
+        embed.add_field(
+            name="💡 建议",
+            value="请尝试寻找该歌曲的较短版本，或选择其他歌曲。",
+            inline=False
+        )
+        embed.add_field(
+            name="🎵 替代方案",
+            value="• 寻找歌曲的单曲版本而非专辑版本\n• 选择官方版本而非扩展混音版本\n• 考虑添加歌曲的精华片段",
+            inline=False
+        )
+        await ctx.send(embed=embed)
 
     async def cleanup(self) -> None:
         """Clean up music commands resources."""

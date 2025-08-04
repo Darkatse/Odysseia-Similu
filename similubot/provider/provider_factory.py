@@ -9,6 +9,7 @@ from similubot.core.interfaces import IAudioProvider, AudioInfo
 from similubot.utils.config_manager import ConfigManager
 from .youtube_provider import YouTubeProvider
 from .catbox_provider import CatboxProvider
+from .netease_provider import NetEaseProvider
 
 try:
     from .bilibili_provider import BilibiliProvider
@@ -42,7 +43,8 @@ class AudioProviderFactory:
         # 初始化所有提供者
         self._providers: List[IAudioProvider] = [
             YouTubeProvider(temp_dir, config),
-            CatboxProvider(temp_dir)
+            CatboxProvider(temp_dir),
+            NetEaseProvider(temp_dir)
         ]
 
         # 添加 Bilibili 提供者（如果可用）
@@ -52,12 +54,13 @@ class AudioProviderFactory:
         # 创建提供者映射
         self._provider_map: Dict[str, IAudioProvider] = {
             'youtube': self._providers[0],
-            'catbox': self._providers[1]
+            'catbox': self._providers[1],
+            'netease': self._providers[2]
         }
 
         # 添加 Bilibili 提供者到映射（如果可用）
-        if BILIBILI_PROVIDER_AVAILABLE and len(self._providers) > 2:
-            self._provider_map['bilibili'] = self._providers[2]
+        if BILIBILI_PROVIDER_AVAILABLE and len(self._providers) > 3:
+            self._provider_map['bilibili'] = self._providers[3]
     
     def get_supported_providers(self) -> List[str]:
         """

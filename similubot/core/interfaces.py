@@ -28,6 +28,55 @@ class AudioInfo:
 
 
 @dataclass
+class NetEaseSearchResult:
+    """
+    网易云音乐搜索结果数据类
+
+    包含搜索结果的基本信息，用于用户选择和后续处理。
+    """
+    song_id: str
+    title: str
+    artist: str
+    album: str
+    cover_url: Optional[str] = None
+    duration: Optional[int] = None  # 歌曲时长（秒）
+
+    def get_display_name(self) -> str:
+        """
+        获取用于显示的歌曲名称
+
+        Returns:
+            格式化的歌曲显示名称
+        """
+        return f"{self.title} - {self.artist}"
+
+    def get_full_display_info(self) -> str:
+        """
+        获取完整的显示信息
+
+        Returns:
+            包含专辑信息的完整显示名称
+        """
+        if self.album and self.album != self.title:
+            return f"{self.title} - {self.artist} ({self.album})"
+        return self.get_display_name()
+
+    def format_duration(self) -> str:
+        """
+        格式化歌曲时长
+
+        Returns:
+            格式化的时长字符串，如 "3:45"
+        """
+        if self.duration is None:
+            return "未知时长"
+
+        minutes = self.duration // 60
+        seconds = self.duration % 60
+        return f"{minutes}:{seconds:02d}"
+
+
+@dataclass
 class SongInfo:
     """歌曲信息数据类"""
     audio_info: AudioInfo

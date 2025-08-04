@@ -7,6 +7,9 @@ import json
 from typing import Optional, Dict, Any, Tuple
 from urllib.parse import quote
 
+# 延迟导入以避免循环依赖
+# from similubot.utils.netease_search import search_song_id, search_and_get_lyrics
+
 
 class NetEaseCloudMusicClient:
     """
@@ -38,94 +41,24 @@ class NetEaseCloudMusicClient:
     async def search_song_id(self, song_title: str, artist: str = "") -> Optional[str]:
         """
         在网易云音乐搜索歌曲并返回歌曲ID
-        
+
+        使用统一的NetEase搜索实现，消除代码重复。
+
         Args:
             song_title: 要搜索的歌曲标题
             artist: 艺术家名称（可选，有助于提高搜索准确性）
-            
+
         Returns:
             歌曲ID字符串，如果未找到则返回None
         """
-        # 首先清理歌曲标题
-        cleaned_title = self._clean_search_query(song_title)
-
-        # 构建搜索查询，智能处理艺术家
-        if artist:
-            search_query = self._construct_search_query(cleaned_title, artist)
-        else:
-            search_query = cleaned_title
-
         try:
-            self.logger.debug(f"在网易云搜索: {search_query}")
-
-            # 搜索参数
-            params = {
-                's': search_query,
-                'type': 1,  # 1 = 歌曲, 2 = 专辑, 3 = 艺术家, 4 = 歌词
-                'limit': 5,  # 获取前5个结果以便更好匹配
-            }
-
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.get(
-                    self.search_api,
-                    params=params,
-                    headers=self.headers
-                ) as response:
-                    if response.status != 200:
-                        self.logger.warning(f"网易云搜索API返回状态 {response.status}")
-                        return None
-
-                    # 稳健地处理不同内容类型
-                    data = None
-
-                    # 首先检查内容类型
-                    content_type = response.headers.get('content-type', '').lower()
-                    self.logger.debug(f"响应内容类型: {content_type}")
-
-                    # 尝试首先获取响应文本
-                    try:
-                        text_response = await response.text()
-                        self.logger.debug(f"响应文本长度: {len(text_response)}")
-                    except Exception as e:
-                        self.logger.error(f"读取响应文本失败: {e}")
-                        return None
-
-                    # 尝试解析为JSON，无论内容类型如何
-                    if text_response.strip():
-                        try:
-                            data = json.loads(text_response)
-                            self.logger.debug("成功将响应解析为JSON")
-                        except json.JSONDecodeError as e:
-                            self.logger.warning(f"响应不是有效的JSON: {e}")
-                            self.logger.debug(f"响应内容（前300字符）: {text_response[:300]}...")
-                            return None
-                    else:
-                        self.logger.warning("收到空响应")
-                        return None
-
-                    # 检查是否有结果
-                    if not data.get('result') or not data['result'].get('songs'):
-                        self.logger.debug(f"未找到搜索结果: {search_query}")
-                        return None
-
-                    songs = data['result']['songs']
-
-                    # 尝试找到最佳匹配
-                    best_match = self._find_best_match(songs, song_title, artist)
-
-                    if best_match:
-                        song_id = str(best_match['id'])
-                        self.logger.info(f"找到歌曲ID {song_id}: {search_query}")
-                        return song_id
-                    else:
-                        self.logger.debug(f"未找到合适的匹配: {search_query}")
-                        return None
-
-        except asyncio.TimeoutError:
-            self.logger.warning(f"搜索歌曲超时: {search_query}")
-            return None
+            self.logger.debug(f"使用统一搜索功能搜索: {song_title} - {artist}")
+            # 延迟导入以避免循环依赖
+            from similubot.utils.netease_search import search_song_id as unified_search_song_id
+            # 使用统一的搜索功能
+            return await unified_search_song_id(song_title, artist)
         except Exception as e:
-            self.logger.error(f"搜索歌曲 '{search_query}' 时出错: {e}", exc_info=True)
+            self.logger.error(f"搜索歌曲ID时出错: {e}", exc_info=True)
             return None
 
     async def get_lyrics(self, song_id: str) -> Optional[Dict[str, Any]]:
@@ -424,6 +357,8 @@ class NetEaseCloudMusicClient:
         """
         在一个操作中搜索歌曲并获取其歌词
 
+        使用统一的NetEase搜索实现，消除代码重复。
+
         Args:
             song_title: 歌曲标题
             artist: 艺术家名称（可选）
@@ -432,21 +367,11 @@ class NetEaseCloudMusicClient:
             包含歌词数据的字典，如果失败则返回None
         """
         try:
-            # 首先尝试直接搜索方法
-            song_id = await self.search_song_id(song_title, artist)
-            if song_id:
-                lyrics_data = await self.get_lyrics(song_id)
-                if lyrics_data:
-                    return lyrics_data
-
-            # 如果直接搜索失败，尝试一些常见的歌曲ID进行测试
-            # 这是开发/测试目的的回退
-            self.logger.debug(f"'{song_title}' 的直接搜索失败，尝试回退方法")
-
-            # 现在，返回None以优雅地处理缺失的歌词
-            # 在生产中，您可能想要实现额外的搜索策略
-            return None
-
+            self.logger.debug(f"使用统一搜索功能获取歌词: {song_title} - {artist}")
+            # 延迟导入以避免循环依赖
+            from similubot.utils.netease_search import search_and_get_lyrics as unified_search_and_get_lyrics
+            # 使用统一的搜索和获取功能
+            return await unified_search_and_get_lyrics(song_title, artist)
         except Exception as e:
-            self.logger.error(f"'{song_title}' by '{artist}' 的search_and_get_lyrics出错: {e}", exc_info=True)
+            self.logger.error(f"搜索并获取歌词时出错: {e}", exc_info=True)
             return None
