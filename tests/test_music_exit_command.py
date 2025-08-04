@@ -31,7 +31,7 @@ class TestMusicExitCommand(unittest.IsolatedAsyncioTestCase):
         self.mock_config = Mock(spec=ConfigManager)
         self.mock_config.get.return_value = True  # 默认启用音乐功能
         
-        # 创建模拟音乐播放器
+        # 创建模拟音乐播放器（MusicPlayerAdapter）
         self.mock_music_player = Mock()
         self.mock_music_player.voice_manager = Mock()
         self.mock_music_player.voice_manager.disconnect_from_guild = AsyncMock(return_value=True)

@@ -359,7 +359,16 @@ class MusicPlayerAdapter:
     async def initialize_persistence(self) -> None:
         """初始化持久化系统"""
         await self._playback_engine.initialize_persistence()
-    
+
+    async def manual_save(self, guild_id: int) -> None:
+        """
+        手动保存当前服务器的队列状态到持久化存储
+
+        Args:
+            guild_id: 服务器ID
+        """
+        await self._playback_engine.manual_save(guild_id)
+
     async def cleanup_all(self) -> None:
         """清理所有资源"""
         try:
