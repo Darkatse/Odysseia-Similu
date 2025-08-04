@@ -10,7 +10,8 @@
 
 import logging
 import asyncio
-from typing import Optional, List, Set, Callable, Any, Dict, Union
+import inspect
+from typing import Optional, List, Set, Callable, Any, Dict, Union, Awaitable
 from enum import Enum
 import discord
 from discord.ext import commands
@@ -76,14 +77,38 @@ class SkipVotePoll:
         # 计算投票阈值
         self.required_votes = self._calculate_required_votes()
         
-        # 投票完成回调
-        self.on_vote_complete: Optional[Callable[[VoteResult], None]] = None
+        # 投票完成回调 - 支持同步和异步回调
+        self.on_vote_complete: Optional[Union[
+            Callable[[VoteResult], None],
+            Callable[[VoteResult], Awaitable[None]]
+        ]] = None
         
         self.logger.debug(
             f"初始化跳过投票 - 歌曲: {current_song.title}, "
             f"语音频道成员: {len(voice_channel_members)}, "
             f"需要投票数: {self.required_votes}"
         )
+
+    async def _invoke_callback(self, callback: Callable, result: VoteResult) -> None:
+        """
+        调用回调函数，支持同步和异步回调
+
+        Args:
+            callback: 回调函数（可以是同步或异步）
+            result: 投票结果
+        """
+        try:
+            # 检查回调是否是协程函数
+            if inspect.iscoroutinefunction(callback):
+                # 异步回调
+                self.logger.debug("调用异步投票完成回调")
+                await callback(result)
+            else:
+                # 同步回调
+                self.logger.debug("调用同步投票完成回调")
+                callback(result)
+        except Exception as e:
+            self.logger.error(f"调用投票完成回调时发生错误: {e}", exc_info=True)
     
     def _calculate_required_votes(self) -> int:
         """
@@ -173,9 +198,9 @@ class SkipVotePoll:
             
             self.logger.info(f"投票结束 - 结果: {self.result.value}")
             
-            # 调用完成回调
+            # 调用完成回调 - 支持同步和异步回调
             if self.on_vote_complete:
-                self.on_vote_complete(self.result)
+                await self._invoke_callback(self.on_vote_complete, self.result)
             
             return self.result
             
