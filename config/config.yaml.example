@@ -5,6 +5,15 @@ discord:
   token: "YOUR_DISCORD_BOT_TOKEN_HERE"  # 在此处填入您的 Discord 机器人令牌
   command_prefix: "!"  # 命令前缀，用户需要在命令前输入此符号
 
+# 机器人管理配置
+bot:
+  # 机器人所有者的 Discord 用户 ID，用于管理员权限控制
+  # 获取方法：在 Discord 中右键点击您的用户名，选择"复制 ID"
+  # 注意：需要在 Discord 设置中启用"开发者模式"才能看到此选项
+  owner_id: 123456789012345678  
+  # 机器人管理员的 Discord 用户 ID（可选，通常与 owner_id 相同）
+  admin_id: 123456789012345678  
+
 # 下载配置
 download:
   temp_dir: "./temp"  # 临时文件存储目录

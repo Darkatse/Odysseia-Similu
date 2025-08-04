@@ -81,7 +81,8 @@ class MusicCommands:
             "!music stop - 停止播放并清空队列",
             "!music jump <数字> - 跳转到队列指定位置",
             "!music seek <时间> - 跳转到指定时间 (例如: 1:30, +30, -1:00)",
-            "!music status - 显示队列持久化状态"
+            "!music status - 显示队列持久化状态",
+            "!music exit - 安全关闭机器人（仅限所有者）"
         ]
 
         help_text = (
@@ -130,6 +131,8 @@ class MusicCommands:
             await self._handle_seek_command(ctx, list(args[1:]))
         elif subcommand in ["persistence", "persist", "status"]:
             await self.persistence_status(ctx)
+        elif subcommand in ["exit", "quit", "shutdown"]:
+            await self._handle_exit_command(ctx)
         elif subcommand in ["netease", "ne", "网易", "网易云"]:
             await self._handle_netease_command(ctx, list(args[1:]))
         elif self.music_player.is_supported_url(subcommand):
@@ -796,7 +799,8 @@ class MusicCommands:
             "`!music skip` - 跳过当前歌曲\n"
             "`!music stop` - 停止播放并清空队列\n"
             "`!music jump <数字>` - 跳转到指定位置\n"
-            "`!music seek <时间>` - 跳转到指定时间 (例如: 1:30, +30, -1:00)"
+            "`!music seek <时间>` - 跳转到指定时间 (例如: 1:30, +30, -1:00)\n"
+            "`!music exit` - 安全关闭机器人（仅限所有者）"
         )
 
         embed.add_field(
