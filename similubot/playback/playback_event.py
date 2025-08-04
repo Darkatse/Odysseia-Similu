@@ -201,7 +201,7 @@ class PlaybackEvent:
         except Exception as e:
             self.logger.error(f"❌ 发送跳过通知时出错: {e}", exc_info=True)
 
-    async def your_song_notification(self, bot, guild_id, channel_id, song) -> None:
+    async def your_song_notification(self, bot, guild_id, channel_id, song, interval) -> None:
         """
         发送轮到你的歌的提醒通知
 
@@ -213,13 +213,19 @@ class PlaybackEvent:
             guild_id: 服务器ID
             channel_id: 文本频道ID
             song: 即将播放的歌曲信息
+            interval: 指定歌曲的距离
         """
         try:
             self.logger.debug(f"📣 发送轮到你的歌通知 - 服务器 {guild_id}, 点歌人: {song.requester.name}, 歌曲: {song.title}")
 
+            if interval == 1:
+                interval_str = "下一首"
+            elif interval == 2:
+                interval_str = "下下首"
+
             embed = discord.Embed(
                 title="📣 轮到你的歌了",
-                description=f"下下首播放: {song.title}",
+                description=f"{interval_str}播放: {song.title}",
                 color=discord.Color.blue()
             )
 
@@ -244,7 +250,7 @@ class PlaybackEvent:
             channel = bot.get_channel(channel_id)
             if channel:
                 await channel.send(embed=embed)
-                await channel.send(content=f"{song.requester.mention}, 要轮到你的歌了！请准备好。")
+                await channel.send(content=f"{song.requester.mention}, {interval_str}就是你的歌了！请准备好。")
                 self.logger.info(f"✅ 轮到你的歌通知发送成功 - {song.title}")
             else:
                 self.logger.warning(f"❌ 频道 {channel_id} 不存在，无法发送通知")

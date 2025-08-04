@@ -648,7 +648,7 @@ class PlaybackEngine(IPlaybackEngine):
 
     async def _check_and_notify_next_song(self, guild_id: int) -> None:
         """
-        检查下下首歌曲的点歌人状态并发送通知（如果配置启用）
+        检查下首和下下首歌曲的点歌人状态并发送通知（如果配置启用）
 
         这是一个可配置的功能，允许服务器管理员控制是否向缺席用户发送
         "轮到你的歌了"的提醒通知。
@@ -669,17 +669,21 @@ class PlaybackEngine(IPlaybackEngine):
             # 查看下下首歌曲（不从队列中移除）- 修复队列同步问题
             # 如果是原来的下首歌曲会导致没有通知的连锁反应
             queue_manager = self.get_queue_manager(guild_id)
-            next_song = queue_manager.peek_next_song(2)  # 获取下下首歌曲
+            next_song = queue_manager.peek_next_song() # 获取下首
+            next_2_song = queue_manager.peek_next_song(2)  # 获取下下首歌曲
 
             if not next_song:
-                self.logger.debug(f"📭 没有下下首歌曲 - 服务器 {guild_id}")
+                self.logger.debug(f"📭 没有下一首歌曲 - 服务器 {guild_id}")
                 return
 
             # 处理 MockMember（已离开服务器的用户）和真实用户
             requester_name = getattr(next_song.requester, 'name', next_song.requester.display_name)
             is_mock_member = not hasattr(next_song.requester, 'guild') or next_song.requester.__class__.__name__ == 'MockMember'
+            requester2_name = getattr(next_2_song.requester, 'name', next_2_song.requester.display_name) if next_2_song else "未知"
+            is_mock_member2 = not hasattr(next_2_song.requester, 'guild') or next_2_song.requester.__class__.__name__ == 'MockMember'
 
             self.logger.debug(f"🔍 检查下一首歌曲的点歌人状态: {next_song.title} - {requester_name}")
+            self.logger.debug(f"🔍 检查下下首歌曲的点歌人状态: {next_2_song.title} - {requester2_name}")
 
             # 检查下一首歌曲的点歌人是否在语音频道
             if is_mock_member or not next_song.requester.voice or not next_song.requester.voice.channel:
@@ -696,14 +700,33 @@ class PlaybackEngine(IPlaybackEngine):
                             "your_song_notification",
                             guild_id=guild_id,
                             channel_id=text_channel_id,
-                            song=next_song
+                            song=next_song,
+                            interval=1
                         )
                     )
                 else:
                     self.logger.warning(f"⚠️ 服务器 {guild_id} 没有设置文本频道，无法发送提醒通知")
             else:
-                self.logger.debug(f"✅ 下下首歌曲的点歌人 {next_song.requester.name} 在语音频道中")
+                self.logger.debug(f"✅ 下一首歌曲的点歌人 {next_song.requester.name} 在语音频道中")
 
+            if is_mock_member2 or not next_2_song.requester.voice or not next_2_song.requester.voice.channel:
+                if is_mock_member:
+                    self.logger.debug(f"📢 下下首歌曲的点歌人 {requester2_name} 已离开服务器，发送提醒通知")
+                else:
+                    self.logger.debug(f"📢 下下首歌曲的点歌人 {requester2_name} 不在语音频道，发送提醒通知")
+                
+                text_channel_id = self.get_text_channel_id(guild_id)
+                if text_channel_id:
+                    asyncio.create_task(
+                        self._trigger_event(
+                            "your_song_notification",
+                            guild_id=guild_id,
+                            channel_id=text_channel_id,
+                            song=next_2_song,
+                            interval=2
+                        )
+                    )
+            
         except Exception as e:
             self.logger.error(f"❌ 检查下一首歌曲通知时出错 - 服务器 {guild_id}: {e}", exc_info=True)
 

@@ -79,9 +79,10 @@ class IQueueManager(ABC):
         pass
     
     @abstractmethod
-    def peek_next_song(self) -> Optional[SongInfo]:
-        """查看下一首歌曲但不从队列中移除"""
+    def peek_next_song(self, index: int = 0) -> Optional[SongInfo]:
+        """查看指定索引的下一首歌曲但不从队列中移除"""
         pass
+
 
     @abstractmethod
     async def get_next_song(self) -> Optional[SongInfo]:

@@ -257,9 +257,12 @@ class QueueManager(IQueueManager):
 
             return position
     
-    def peek_next_song(self) -> Optional[SongInfo]:
+    def peek_next_song(self, index=0) -> Optional[SongInfo]:
         """
         查看下一首歌曲但不从队列中移除
+
+        Args:
+            index: 可选的索引位置（从0开始），如果为None则返回第一首歌曲
 
         这个方法用于预览下一首歌曲，不会修改队列状态。
         主要用于检查下一首歌曲的点歌人状态等场景。
@@ -269,21 +272,14 @@ class QueueManager(IQueueManager):
         """
         if not self._queue:
             return None
+        
+        if index != 0:
+            if index < 0 or index >= len(self._queue):
+                return None
+            return self._queue[index]
+        
         return self._queue[0]
     
-    def peek_next_song(self, index) -> Optional[SongInfo]:
-        """
-        查看指定索引的歌曲但不从队列中移除
-
-        Args:
-            index: 歌曲索引（从0开始）
-
-        Returns:
-            指定索引的歌曲，如果索引无效则返回None
-        """
-        if index < 0 or index >= len(self._queue):
-            return None
-        return self._queue[index]
 
     async def get_next_song(self) -> Optional[SongInfo]:
         """
