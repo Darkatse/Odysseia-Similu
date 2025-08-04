@@ -86,7 +86,7 @@ class SearchConfirmationView(discord.ui.View):
             self.logger.error(f"处理确认按钮时出错: {e}", exc_info=True)
             await interaction.response.send_message("❌ 处理确认时出错", ephemeral=True)
     
-    @discord.ui.button(label="❌ 拒绝", style=discord.ButtonStyle.red, custom_id="deny")
+    @discord.ui.button(label="❌ 不是这首，展示更多", style=discord.ButtonStyle.red, custom_id="deny")
     async def deny_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """拒绝按钮回调"""
         try:
