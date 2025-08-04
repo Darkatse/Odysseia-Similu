@@ -315,3 +315,44 @@ class ConfigManager:
             True if absent user notifications are enabled, False otherwise
         """
         return self.get('playback.notify_absent_users', True)
+
+    # Skip Voting Configuration Methods
+    def is_skip_voting_enabled(self) -> bool:
+        """
+        Check if democratic skip voting is enabled.
+
+        Returns:
+            True if skip voting is enabled, False otherwise (direct skip)
+        """
+        return self.get('music.skip_voting.enabled', True)
+
+    def get_skip_voting_threshold(self) -> str:
+        """
+        Get the skip voting threshold configuration.
+
+        Returns:
+            Threshold value as string (supports both numbers and percentages)
+            Examples: "5", "50%"
+        """
+        threshold = self.get('music.skip_voting.threshold', 5)
+        return str(threshold)
+
+    def get_skip_voting_timeout(self) -> int:
+        """
+        Get the skip voting timeout in seconds.
+
+        Returns:
+            Timeout in seconds for voting polls
+        """
+        return self.get('music.skip_voting.timeout', 60)
+
+    def get_skip_voting_min_voters(self) -> int:
+        """
+        Get the minimum number of voters required for voting.
+
+        When voice channel has fewer users than this, direct skip is allowed.
+
+        Returns:
+            Minimum number of voters required
+        """
+        return self.get('music.skip_voting.min_voters', 2)

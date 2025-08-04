@@ -14,6 +14,7 @@ from similubot.utils.config_manager import ConfigManager
 from similubot.queue.user_queue_status import UserQueueStatusService
 from similubot.utils.netease_search import search_songs, get_playback_url
 from similubot.ui.button_interactions import InteractionManager, InteractionResult
+from similubot.ui.skip_vote_poll import VoteManager, VoteResult
 
 
 class MusicCommands:
@@ -41,6 +42,9 @@ class MusicCommands:
 
         # Initialize interaction manager for NetEase search
         self.interaction_manager = InteractionManager()
+
+        # Initialize vote manager for democratic skip voting
+        self.vote_manager = VoteManager(config)
 
         # Check if music functionality is enabled
         self._enabled = config.get('music.enabled', True)
@@ -77,7 +81,7 @@ class MusicCommands:
             "!music queue - 显示当前播放队列",
             "!music now - 显示当前歌曲播放进度",
             "!music my - 查看您的队列状态和预计播放时间",
-            "!music skip - 跳过当前歌曲",
+            "!music skip - 跳过当前歌曲（支持民主投票）",
             "!music stop - 停止播放并清空队列",
             "!music jump <数字> - 跳转到队列指定位置",
             "!music seek <时间> - 跳转到指定时间 (例如: 1:30, +30, -1:00)",
@@ -576,20 +580,83 @@ class MusicCommands:
 
     async def _handle_skip_command(self, ctx: commands.Context) -> None:
         """
-        Handle skip command.
+        处理跳过歌曲命令 - 支持民主投票系统
 
         Args:
-            ctx: Discord command context
+            ctx: Discord命令上下文
         """
         try:
-            # Check if guild exists
+            # 检查服务器是否存在
             if not ctx.guild:
                 await ctx.reply("❌ 此命令只能在服务器中使用")
                 return
 
-            # Stop any active progress bars
+            # 停止任何活跃的进度条
             self.progress_bar.stop_progress_updates(ctx.guild.id)
 
+            # 获取当前歌曲信息
+            queue_info = await self.music_player.get_queue_info(ctx.guild.id)
+            current_song = queue_info.get("current_song")
+
+            if not current_song:
+                await ctx.reply("❌ 当前没有歌曲在播放")
+                return
+
+            self.logger.debug(f"处理跳过命令 - 当前歌曲: {current_song.title}")
+
+            # 获取语音频道成员
+            voice_members = self.vote_manager.get_voice_channel_members(ctx)
+
+            if not voice_members:
+                await ctx.reply("❌ 机器人未连接到语音频道或无法获取频道成员")
+                return
+
+            # 检查是否应该使用投票系统
+            if not self.vote_manager.should_use_voting(voice_members):
+                # 直接跳过（人数不足或投票系统已禁用）
+                self.logger.debug("使用直接跳过模式")
+                await self._direct_skip_song(ctx, current_song)
+                return
+
+            # 启动民主投票
+            self.logger.info(f"启动民主投票跳过 - 歌曲: {current_song.title}, 语音频道人数: {len(voice_members)}")
+
+            # 创建投票完成回调
+            async def on_vote_complete(result: VoteResult) -> None:
+                """投票完成回调处理"""
+                if result == VoteResult.PASSED:
+                    # 投票通过，执行跳过
+                    self.logger.info(f"投票通过，跳过歌曲: {current_song.title}")
+                    await self._execute_skip(ctx.guild.id, current_song.title)
+                else:
+                    # 投票失败或超时，继续播放
+                    self.logger.info(f"投票未通过 ({result.value})，继续播放: {current_song.title}")
+
+            # 启动投票
+            result = await self.vote_manager.start_skip_vote(
+                ctx=ctx,
+                current_song=current_song,
+                on_vote_complete=on_vote_complete
+            )
+
+            if result is None:
+                # 投票启动失败，回退到直接跳过
+                self.logger.warning("投票启动失败，回退到直接跳过")
+                await self._direct_skip_song(ctx, current_song)
+
+        except Exception as e:
+            self.logger.error(f"处理跳过命令时出错: {e}", exc_info=True)
+            await ctx.reply("❌ 跳过歌曲时出错")
+
+    async def _direct_skip_song(self, ctx: commands.Context, current_song) -> None:
+        """
+        直接跳过歌曲（无投票）
+
+        Args:
+            ctx: Discord命令上下文
+            current_song: 当前歌曲信息
+        """
+        try:
             success, skipped_title, error = await self.music_player.skip_current_song(ctx.guild.id)
 
             if not success:
@@ -603,10 +670,30 @@ class MusicCommands:
             )
 
             await ctx.reply(embed=embed)
+            self.logger.info(f"直接跳过歌曲: {skipped_title}")
 
         except Exception as e:
-            self.logger.error(f"Error in skip command: {e}", exc_info=True)
+            self.logger.error(f"直接跳过歌曲时出错: {e}", exc_info=True)
             await ctx.reply("❌ 跳过歌曲时出错")
+
+    async def _execute_skip(self, guild_id: int, song_title: str) -> None:
+        """
+        执行歌曲跳过操作
+
+        Args:
+            guild_id: 服务器ID
+            song_title: 歌曲标题（用于日志）
+        """
+        try:
+            success, skipped_title, error = await self.music_player.skip_current_song(guild_id)
+
+            if success:
+                self.logger.info(f"成功跳过歌曲: {skipped_title}")
+            else:
+                self.logger.error(f"跳过歌曲失败: {error}")
+
+        except Exception as e:
+            self.logger.error(f"执行跳过操作时出错: {e}", exc_info=True)
 
     async def _handle_stop_command(self, ctx: commands.Context) -> None:
         """
@@ -796,7 +883,7 @@ class MusicCommands:
             "`!music queue` - 显示当前队列\n"
             "`!music now` - 显示当前歌曲\n"
             "`!music my` - 查看您的队列状态\n"
-            "`!music skip` - 跳过当前歌曲\n"
+            "`!music skip` - 投票跳过当前歌曲\n"
             "`!music stop` - 停止播放并清空队列\n"
             "`!music jump <数字>` - 跳转到指定位置\n"
             "`!music seek <时间>` - 跳转到指定时间 (例如: 1:30, +30, -1:00)\n"

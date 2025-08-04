@@ -29,6 +29,20 @@ music:
     before: "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"  # 输入前的 FFmpeg 选项
     options: "-vn"  # FFmpeg 选项（无视频）
 
+  # 跳过歌曲投票系统配置
+  skip_voting:
+    enabled: true  # 是否启用民主投票跳过系统（设置为 false 则恢复直接跳过）
+    threshold: 5  # 投票阈值 - 支持以下格式：
+                  # - 固定数字（如 5）：需要固定数量的投票
+                  # - 百分比字符串（如 "50%"）：需要语音频道内用户的百分比投票
+                  # - 推荐设置：
+                  #   * 小型服务器（< 20人）：3 或 "40%"
+                  #   * 中型服务器（20-100人）：5 或 "50%"（默认）
+                  #   * 大型服务器（> 100人）：7 或 "60%"
+    timeout: 60  # 投票超时时间（秒），超时后投票自动失败
+    min_voters: 2  # 最小投票人数要求（防止单人频道滥用）
+                   # 当语音频道人数少于此值时，允许直接跳过
+
 # 播放事件配置
 playback:
   notify_absent_users: true  # 是否向缺席用户发送"轮到你的歌了"提醒通知
