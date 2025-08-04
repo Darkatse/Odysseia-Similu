@@ -369,26 +369,6 @@ class SkipVotePoll:
             inline=True
         )
 
-        # 投票详情
-        if self.voters:
-            # 获取投票用户名单（仅显示前5个）
-            voter_names = []
-            for member in self.voice_channel_members:
-                if member.id in self.voters:
-                    voter_names.append(member.display_name)
-                if len(voter_names) >= 5:
-                    break
-
-            voter_text = ", ".join(voter_names)
-            if len(self.voters) > 5:
-                voter_text += f" 等 {len(self.voters)} 人"
-
-            embed.add_field(
-                name="👥 投票用户",
-                value=voter_text,
-                inline=True
-            )
-
         embed.set_footer(text="投票已结束")
 
         return embed
