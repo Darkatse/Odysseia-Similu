@@ -73,10 +73,10 @@ class BilibiliProvider(BaseAudioProvider):
     def _extract_video_id(self, url: str) -> Optional[str]:
         """
         从 URL 中提取视频 ID (BV号或AV号)
-        
+
         Args:
             url: Bilibili 视频 URL
-            
+
         Returns:
             视频 ID，提取失败时返回 None
         """
@@ -84,17 +84,45 @@ class BilibiliProvider(BaseAudioProvider):
             match = re.search(pattern, url)
             if match:
                 video_id = match.group(1)
-                
+
                 # 处理短链接的情况，需要进一步解析
                 if 'b23.tv' in url or 'bili2233.cn' in url:
                     # 短链接需要重定向解析，这里简化处理
                     # 实际应用中可能需要发送 HTTP 请求获取重定向后的真实 URL
                     self.logger.warning(f"检测到短链接，可能需要手动解析: {url}")
                     return None
-                
+
                 return video_id
-        
+
         return None
+
+    def _extract_page_index(self, url: str) -> int:
+        """
+        从 URL 中提取页面索引 (p 参数)
+
+        Args:
+            url: Bilibili 视频 URL
+
+        Returns:
+            页面索引，默认为 0 (第一页)
+        """
+        try:
+            parsed_url = urlparse(url)
+            query_params = parse_qs(parsed_url.query)
+
+            # 获取 p 参数，默认为 1 (Bilibili 的页面编号从 1 开始)
+            page_param = query_params.get('p', ['1'])[0]
+            page_number = int(page_param)
+
+            # 转换为 0 基索引 (API 使用 0 基索引)
+            page_index = max(0, page_number - 1)
+
+            self.logger.debug(f"从 URL 提取页面索引: p={page_param} -> page_index={page_index}")
+            return page_index
+
+        except (ValueError, IndexError) as e:
+            self.logger.warning(f"解析页面索引失败，使用默认值 0: {e}")
+            return 0
     
     def _create_bilibili_video_object(self, video_id: str) -> 'bilibili_video.Video':
         """
@@ -121,43 +149,63 @@ class BilibiliProvider(BaseAudioProvider):
     async def _extract_audio_info_impl(self, url: str) -> Optional[AudioInfo]:
         """
         提取 Bilibili 视频的音频信息
-        
+
         Args:
             url: Bilibili 视频 URL
-            
+
         Returns:
             音频信息，失败时返回 None
         """
         try:
-            # 提取视频 ID
+            # 提取视频 ID 和页面索引
             video_id = self._extract_video_id(url)
             if not video_id:
                 self.logger.error(f"无法从 URL 中提取视频 ID: {url}")
                 return None
-            
+
+            page_index = self._extract_page_index(url)
+
             # 创建 Bilibili Video 对象
             video = self._create_bilibili_video_object(video_id)
-            
+
             # 在线程池中执行，避免阻塞
             loop = asyncio.get_event_loop()
             video_info = await loop.run_in_executor(None, lambda: asyncio.run(video.get_info()))
-            
-            # 提取基本信息
-            title = video_info.get('title', 'Unknown Title')
-            duration = video_info.get('duration', 0)
+
+            # 获取页面信息以获取正确的时长
+            pages_info = await loop.run_in_executor(None, lambda: asyncio.run(video.get_pages()))
+
+            # 验证页面索引是否有效
+            if page_index >= len(pages_info):
+                self.logger.warning(f"页面索引 {page_index} 超出范围，视频共有 {len(pages_info)} 页，使用第一页")
+                page_index = 0
+
+            # 获取指定页面的信息
+            page_info = pages_info[page_index]
+            page_title = page_info.get('part', video_info.get('title', 'Unknown Title'))
+            page_duration = page_info.get('duration', video_info.get('duration', 0))
+
+            # 如果是多P视频，在标题中包含分P信息
+            if len(pages_info) > 1:
+                main_title = video_info.get('title', 'Unknown Title')
+                title = f"{main_title} - P{page_index + 1}: {page_title}"
+                self.logger.debug(f"多P视频，使用页面 {page_index + 1}/{len(pages_info)}: {page_title}")
+            else:
+                title = page_title
+
             uploader = video_info.get('owner', {}).get('name', 'Unknown Uploader')
             thumbnail_url = video_info.get('pic', '')
-            
-            self.logger.debug(f"成功获取 Bilibili 视频信息: {title} - {uploader}")
-            
+
+            self.logger.debug(f"成功获取 Bilibili 视频信息: {title} - {uploader} (时长: {page_duration}s)")
+
             return AudioInfo(
                 title=title,
-                duration=duration,
+                duration=page_duration,  # 使用页面的实际时长
                 url=url,
                 uploader=uploader,
                 thumbnail_url=thumbnail_url
             )
-            
+
         except Exception as e:
             self.logger.error(f"提取 Bilibili 音频信息时发生错误: {e}")
             return None
@@ -184,18 +232,28 @@ class BilibiliProvider(BaseAudioProvider):
                     message="正在获取 Bilibili 视频信息..."
                 ))
             
-            # 提取视频 ID
+            # 提取视频 ID 和页面索引
             video_id = self._extract_video_id(url)
             if not video_id:
                 return False, None, f"无法从 URL 中提取视频 ID: {url}"
-            
+
+            page_index = self._extract_page_index(url)
+
             # 创建 Bilibili Video 对象
             video = self._create_bilibili_video_object(video_id)
-            
+
             # 获取视频信息
             loop = asyncio.get_event_loop()
             video_info = await loop.run_in_executor(None, lambda: asyncio.run(video.get_info()))
-            
+
+            # 获取页面信息以验证页面索引
+            pages_info = await loop.run_in_executor(None, lambda: asyncio.run(video.get_pages()))
+
+            # 验证页面索引是否有效
+            if page_index >= len(pages_info):
+                self.logger.warning(f"页面索引 {page_index} 超出范围，视频共有 {len(pages_info)} 页，使用第一页")
+                page_index = 0
+
             if progress_tracker:
                 await progress_tracker.update(ProgressInfo(
                     operation="bilibili_download",
@@ -203,9 +261,9 @@ class BilibiliProvider(BaseAudioProvider):
                     percentage=20.0,
                     message="正在获取音频下载链接..."
                 ))
-            
-            # 获取下载链接 (默认使用第一个分P，page_index=0)
-            download_data = await loop.run_in_executor(None, lambda: asyncio.run(video.get_download_url(page_index=0)))
+
+            # 获取指定页面的下载链接
+            download_data = await loop.run_in_executor(None, lambda: asyncio.run(video.get_download_url(page_index=page_index)))
             
             # 解析下载数据
             detector = VideoDownloadURLDataDetecter(download_data)
@@ -245,10 +303,22 @@ class BilibiliProvider(BaseAudioProvider):
             if not success:
                 return False, None, "音频文件下载失败"
             
+            # 获取指定页面的信息用于创建音频信息对象
+            page_info = pages_info[page_index]
+            page_title = page_info.get('part', video_info.get('title', 'Unknown Title'))
+            page_duration = page_info.get('duration', video_info.get('duration', 0))
+
+            # 如果是多P视频，在标题中包含分P信息
+            if len(pages_info) > 1:
+                main_title = video_info.get('title', 'Unknown Title')
+                title = f"{main_title} - P{page_index + 1}: {page_title}"
+            else:
+                title = page_title
+
             # 创建音频信息对象
             audio_info = AudioInfo(
-                title=video_info.get('title', 'Unknown Title'),
-                duration=video_info.get('duration', 0),
+                title=title,
+                duration=page_duration,  # 使用页面的实际时长
                 url=url,
                 uploader=video_info.get('owner', {}).get('name', 'Unknown Uploader'),
                 thumbnail_url=video_info.get('pic', ''),

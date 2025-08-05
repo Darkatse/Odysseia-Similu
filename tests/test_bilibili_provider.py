@@ -122,11 +122,50 @@ class TestBilibiliProvider:
             "https://b23.tv/abc123",
             "https://bili2233.cn/xyz789"
         ]
-        
+
         for url in short_urls:
             video_id = self.provider._extract_video_id(url)
             # 短链接应该返回 None，因为需要额外的重定向解析
             assert video_id is None, f"短链接 {url} 应该返回 None 以表示需要进一步处理"
+
+    def test_extract_page_index_default(self):
+        """测试默认页面索引提取（无 p 参数）"""
+        urls_without_p = [
+            "https://www.bilibili.com/video/BV1uv411q7Mv",
+            "https://bilibili.com/video/BV1234567890?t=123",
+            "https://www.bilibili.com/video/BV1Ab2Cd3Ef4?vd_source=abc123"
+        ]
+
+        for url in urls_without_p:
+            page_index = self.provider._extract_page_index(url)
+            assert page_index == 0, f"URL {url} 应该返回默认页面索引 0，实际得到 {page_index}"
+
+    def test_extract_page_index_with_p_parameter(self):
+        """测试带 p 参数的页面索引提取"""
+        test_cases = [
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?p=1", 0),  # p=1 -> index=0
+            ("https://www.bilibili.com/video/BV1234567890?p=5", 4),  # p=5 -> index=4
+            ("https://www.bilibili.com/video/BV1Ab2Cd3Ef4?p=26", 25),  # p=26 -> index=25
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?p=1&t=123", 0),  # 多参数
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?vd_source=abc&p=10&spm_id_from=333", 9),  # 多参数
+        ]
+
+        for url, expected_index in test_cases:
+            page_index = self.provider._extract_page_index(url)
+            assert page_index == expected_index, f"URL {url} 应该返回页面索引 {expected_index}，实际得到 {page_index}"
+
+    def test_extract_page_index_invalid_values(self):
+        """测试无效 p 参数值的处理"""
+        invalid_urls = [
+            "https://www.bilibili.com/video/BV1uv411q7Mv?p=0",  # p=0 应该转换为 index=0 (最小值)
+            "https://www.bilibili.com/video/BV1uv411q7Mv?p=-1",  # 负数应该转换为 index=0
+            "https://www.bilibili.com/video/BV1uv411q7Mv?p=abc",  # 非数字应该使用默认值
+            "https://www.bilibili.com/video/BV1uv411q7Mv?p=",  # 空值应该使用默认值
+        ]
+
+        for url in invalid_urls:
+            page_index = self.provider._extract_page_index(url)
+            assert page_index == 0, f"无效 URL {url} 应该返回默认页面索引 0，实际得到 {page_index}"
     
     def test_create_bilibili_video_object_bv(self):
         """测试创建 BV 号的 Bilibili Video 对象"""
@@ -157,27 +196,31 @@ class TestBilibiliProvider:
     
     @pytest.mark.asyncio
     async def test_extract_audio_info_success(self):
-        """测试成功提取音频信息"""
+        """测试成功提取音频信息（单P视频）"""
         mock_video_info = {
             'title': '测试视频标题',
             'duration': 300,
             'owner': {'name': '测试UP主'},
             'pic': 'https://example.com/thumbnail.jpg'
         }
-        
+
+        mock_pages_info = [
+            {'part': '测试视频标题', 'duration': 300}
+        ]
+
         with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
-             patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video:
-            
+             patch.object(self.provider, '_extract_page_index', return_value=0), \
+             patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
+             patch('asyncio.run') as mock_asyncio_run:
+
             mock_video = Mock()
             mock_create_video.return_value = mock_video
-            
-            # 模拟异步调用
-            async def mock_get_info():
-                return mock_video_info
-            
-            with patch('asyncio.run', return_value=mock_video_info):
-                result = await self.provider._extract_audio_info_impl("https://www.bilibili.com/video/BV1uv411q7Mv")
-            
+
+            # 第一次调用返回视频信息，第二次调用返回页面信息
+            mock_asyncio_run.side_effect = [mock_video_info, mock_pages_info]
+
+            result = await self.provider._extract_audio_info_impl("https://www.bilibili.com/video/BV1uv411q7Mv")
+
             assert result is not None
             assert result.title == '测试视频标题'
             assert result.duration == 300
@@ -197,9 +240,77 @@ class TestBilibiliProvider:
         """测试提取音频信息时发生异常"""
         with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
              patch.object(self.provider, '_create_bilibili_video_object', side_effect=Exception("测试异常")):
-            
+
             result = await self.provider._extract_audio_info_impl("https://www.bilibili.com/video/BV1uv411q7Mv")
             assert result is None
+
+    @pytest.mark.asyncio
+    async def test_extract_audio_info_multi_part_video(self):
+        """测试多P视频的音频信息提取"""
+        mock_video_info = {
+            'title': '测试合集视频',
+            'duration': 1800,  # 总时长30分钟
+            'owner': {'name': '测试UP主'},
+            'pic': 'https://example.com/thumbnail.jpg'
+        }
+
+        mock_pages_info = [
+            {'part': '第一部分', 'duration': 300},  # 5分钟
+            {'part': '第二部分', 'duration': 450},  # 7.5分钟
+            {'part': '第三部分', 'duration': 600},  # 10分钟
+        ]
+
+        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+             patch.object(self.provider, '_extract_page_index', return_value=1), \
+             patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
+             patch('asyncio.run') as mock_asyncio_run:
+
+            mock_video = Mock()
+            mock_create_video.return_value = mock_video
+
+            # 第一次调用返回视频信息，第二次调用返回页面信息
+            mock_asyncio_run.side_effect = [mock_video_info, mock_pages_info]
+
+            audio_info = await self.provider._extract_audio_info_impl("https://www.bilibili.com/video/BV1uv411q7Mv?p=2")
+
+            assert audio_info is not None
+            assert audio_info.title == '测试合集视频 - P2: 第二部分'  # 应该包含分P信息
+            assert audio_info.duration == 450  # 应该是第二部分的时长，不是总时长
+            assert audio_info.uploader == '测试UP主'
+            assert audio_info.thumbnail_url == 'https://example.com/thumbnail.jpg'
+            assert audio_info.url == "https://www.bilibili.com/video/BV1uv411q7Mv?p=2"
+
+    @pytest.mark.asyncio
+    async def test_extract_audio_info_page_index_out_of_range(self):
+        """测试页面索引超出范围的处理"""
+        mock_video_info = {
+            'title': '测试视频',
+            'duration': 300,
+            'owner': {'name': '测试UP主'},
+            'pic': 'https://example.com/thumbnail.jpg'
+        }
+
+        mock_pages_info = [
+            {'part': '唯一部分', 'duration': 300}
+        ]
+
+        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+             patch.object(self.provider, '_extract_page_index', return_value=5), \
+             patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
+             patch('asyncio.run') as mock_asyncio_run:
+
+            mock_video = Mock()
+            mock_create_video.return_value = mock_video
+
+            # 第一次调用返回视频信息，第二次调用返回页面信息
+            mock_asyncio_run.side_effect = [mock_video_info, mock_pages_info]
+
+            audio_info = await self.provider._extract_audio_info_impl("https://www.bilibili.com/video/BV1uv411q7Mv?p=6")
+
+            assert audio_info is not None
+            assert audio_info.title == '唯一部分'  # 应该回退到第一页
+            assert audio_info.duration == 300  # 应该是第一页的时长
+            assert audio_info.uploader == '测试UP主'
     
     @pytest.mark.asyncio
     async def test_download_audio_stream_success(self):
@@ -330,6 +441,7 @@ class TestBilibiliProvider:
         progress_callback.update = AsyncMock()
 
         with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+             patch.object(self.provider, '_extract_page_index', return_value=0), \
              patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
              patch.object(self.provider, '_download_audio_stream', return_value=True), \
              patch('similubot.provider.bilibili_provider.VideoDownloadURLDataDetecter') as mock_detector_class, \
@@ -339,8 +451,11 @@ class TestBilibiliProvider:
             mock_video = Mock()
             mock_create_video.return_value = mock_video
 
-            # 第一次调用返回视频信息，第二次调用返回下载数据（带 page_index=0 参数）
-            mock_asyncio_run.side_effect = [mock_video_info, mock_download_data]
+            # 模拟页面信息
+            mock_pages_info = [{'part': '测试视频', 'duration': 300}]
+
+            # 第一次调用返回视频信息，第二次返回页面信息，第三次调用返回下载数据
+            mock_asyncio_run.side_effect = [mock_video_info, mock_pages_info, mock_download_data]
 
             # 模拟检测器
             mock_detector = Mock()
@@ -383,12 +498,11 @@ class TestBilibiliProvider:
             mock_video = Mock()
             mock_create_video.return_value = mock_video
 
-            # 验证 get_download_url 被调用时传递了 page_index=0
-            def mock_get_download_url_call():
-                # 这个函数模拟 video.get_download_url(page_index=0) 的调用
-                return mock_download_data
+            # 模拟页面信息
+            mock_pages_info = [{'part': '测试视频', 'duration': 300}]
 
-            mock_asyncio_run.side_effect = [mock_video_info, mock_get_download_url_call()]
+            # 第一次调用返回视频信息，第二次返回页面信息，第三次返回下载数据
+            mock_asyncio_run.side_effect = [mock_video_info, mock_pages_info, mock_download_data]
 
             mock_detector = Mock()
             mock_detector.check_video_and_audio_stream.return_value = True
@@ -408,8 +522,8 @@ class TestBilibiliProvider:
             assert audio_info is not None
             assert error is None
 
-            # 验证 asyncio.run 被调用了两次（一次获取视频信息，一次获取下载链接）
-            assert mock_asyncio_run.call_count == 2
+            # 验证 asyncio.run 被调用了三次（一次获取视频信息，一次获取页面信息，一次获取下载链接）
+            assert mock_asyncio_run.call_count == 3
 
     @pytest.mark.asyncio
     async def test_download_audio_impl_no_audio_stream(self):
@@ -418,11 +532,14 @@ class TestBilibiliProvider:
         mock_download_data = {'dash': {'video': []}}
 
         with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+             patch.object(self.provider, '_extract_page_index', return_value=0), \
              patch.object(self.provider, '_create_bilibili_video_object'), \
              patch('similubot.provider.bilibili_provider.VideoDownloadURLDataDetecter') as mock_detector_class, \
              patch('asyncio.run') as mock_asyncio_run:
 
-            mock_asyncio_run.side_effect = [mock_video_info, mock_download_data]
+            # 模拟页面信息
+            mock_pages_info = [{'part': '测试视频', 'duration': 300}]
+            mock_asyncio_run.side_effect = [mock_video_info, mock_pages_info, mock_download_data]
 
             mock_detector = Mock()
             mock_detector.check_video_and_audio_stream.return_value = True
@@ -445,11 +562,14 @@ class TestBilibiliProvider:
         mock_download_data = {'durl': [{'url': 'https://example.com/video.flv'}]}
 
         with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+             patch.object(self.provider, '_extract_page_index', return_value=0), \
              patch.object(self.provider, '_create_bilibili_video_object'), \
              patch('similubot.provider.bilibili_provider.VideoDownloadURLDataDetecter') as mock_detector_class, \
              patch('asyncio.run') as mock_asyncio_run:
 
-            mock_asyncio_run.side_effect = [mock_video_info, mock_download_data]
+            # 模拟页面信息
+            mock_pages_info = [{'part': '测试视频', 'duration': 300}]
+            mock_asyncio_run.side_effect = [mock_video_info, mock_pages_info, mock_download_data]
 
             mock_detector = Mock()
             mock_detector.check_video_and_audio_stream.return_value = False
@@ -471,12 +591,15 @@ class TestBilibiliProvider:
         mock_download_data = {'dash': {'audio': [{'base_url': 'https://example.com/audio.mp3', 'id': 30232}]}}
 
         with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+             patch.object(self.provider, '_extract_page_index', return_value=0), \
              patch.object(self.provider, '_create_bilibili_video_object'), \
              patch.object(self.provider, '_download_audio_stream', return_value=False), \
              patch('similubot.provider.bilibili_provider.VideoDownloadURLDataDetecter') as mock_detector_class, \
              patch('asyncio.run') as mock_asyncio_run:
 
-            mock_asyncio_run.side_effect = [mock_video_info, mock_download_data]
+            # 模拟页面信息
+            mock_pages_info = [{'part': '测试视频', 'duration': 300}]
+            mock_asyncio_run.side_effect = [mock_video_info, mock_pages_info, mock_download_data]
 
             mock_detector = Mock()
             mock_detector.check_video_and_audio_stream.return_value = True
@@ -500,6 +623,61 @@ class TestBilibiliProvider:
 @pytest.mark.skipif(BILIBILI_PROVIDER_AVAILABLE, reason="测试依赖不可用时的行为")
 class TestBilibiliProviderUnavailable:
     """测试 Bilibili 提供者依赖不可用时的行为"""
+
+    @pytest.mark.asyncio
+    async def test_download_audio_impl_multi_part_video(self):
+        """测试多P视频下载时使用正确的页面索引和时长"""
+        mock_video_info = {
+            'title': '测试合集视频',
+            'duration': 1800,  # 总时长30分钟
+            'owner': {'name': '测试UP主'},
+            'pic': 'https://example.com/thumbnail.jpg'
+        }
+
+        mock_pages_info = [
+            {'part': '第一部分', 'duration': 300},  # 5分钟
+            {'part': '第二部分', 'duration': 450},  # 7.5分钟
+            {'part': '第三部分', 'duration': 600},  # 10分钟
+        ]
+
+        mock_download_data = {'dash': {'audio': [{'base_url': 'https://example.com/audio.mp3', 'id': 30232}]}}
+
+        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+             patch.object(self.provider, '_extract_page_index', return_value=1), \
+             patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
+             patch.object(self.provider, '_download_audio_stream', return_value=True), \
+             patch('similubot.provider.bilibili_provider.VideoDownloadURLDataDetecter') as mock_detector_class, \
+             patch('asyncio.run') as mock_asyncio_run, \
+             patch('os.path.getsize', return_value=1024):
+
+            mock_video = Mock()
+            mock_create_video.return_value = mock_video
+
+            # 第一次调用返回视频信息，第二次返回页面信息，第三次返回下载数据
+            mock_asyncio_run.side_effect = [mock_video_info, mock_pages_info, mock_download_data]
+
+            mock_detector = Mock()
+            mock_detector.check_video_and_audio_stream.return_value = True
+
+            # 模拟音频流对象
+            from similubot.provider.bilibili_provider import AudioStreamDownloadURL
+            mock_audio_stream = Mock(spec=AudioStreamDownloadURL)
+            mock_audio_stream.url = 'https://example.com/audio.mp3'
+
+            mock_detector.detect_best_streams.return_value = [None, mock_audio_stream]
+            mock_detector_class.return_value = mock_detector
+
+            success, audio_info, error = await self.provider._download_audio_impl(
+                "https://www.bilibili.com/video/BV1uv411q7Mv?p=2"
+            )
+
+            assert success is True
+            assert audio_info is not None
+            assert error is None
+            assert audio_info.title == '测试合集视频 - P2: 第二部分'  # 应该包含分P信息
+            assert audio_info.duration == 450  # 应该是第二部分的时长，不是总时长
+            assert audio_info.uploader == '测试UP主'
+            assert audio_info.file_format == 'mp3'
 
     def test_import_error_handling(self):
         """测试导入错误处理"""
