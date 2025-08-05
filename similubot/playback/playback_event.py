@@ -1,5 +1,7 @@
 import logging
+from aiohttp import payload
 import discord
+import discord.http
 from typing import Optional
 from similubot.core.interfaces import SongInfo
 from similubot.progress.music_progress import MusicProgressBar
@@ -52,7 +54,7 @@ class PlaybackEvent:
         try:
             self.logger.debug(f"📺 开始显示歌曲信息 - 服务器 {guild_id}, 歌曲: {song.title}")
 
-            channel = bot.get_channel(channel_id)
+            channel: discord.VoiceChannel = bot.get_channel(channel_id)
             if not channel:
                 self.logger.warning(f"❌ 频道 {channel_id} 不存在，无法显示歌曲信息")
                 return
@@ -132,6 +134,17 @@ class PlaybackEvent:
                     embed.set_thumbnail(url=song.audio_info.thumbnail_url)
 
                 await response.edit(content=None, embed=embed)
+
+            # 设置频道状态
+            try:
+                route = discord.http.Route("PUT", "/channels/{channel_id}/voice-status", channel_id=channel_id)
+                payload = {
+                    "status": f"🎵 {song.title}"
+                }
+                ret = await channel._state.http.request(route, json=payload)
+                self.logger.info(f"✅ 频道状态设置成功 - {song.title}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ 设置频道状态失败: {e}")
 
             self.logger.info(f"✅ 歌曲信息显示完成 - {song.title}")
 
