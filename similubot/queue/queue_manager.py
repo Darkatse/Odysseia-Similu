@@ -393,6 +393,88 @@ class QueueManager(IQueueManager):
             await self._save_state()
 
             return removed_song
+
+    async def replace_user_song(self, user: discord.Member, new_audio_info: AudioInfo) -> Tuple[bool, Optional[int], Optional[str]]:
+        """
+        替换用户在队列中的第一首歌曲
+
+        这个方法允许用户替换其在队列中的第一首歌曲，保持相同的队列位置。
+        主要用于队列公平性系统，当用户已有歌曲在队列中时提供替换选项。
+
+        Args:
+            user: Discord用户
+            new_audio_info: 新歌曲的音频信息
+
+        Returns:
+            (成功标志, 队列位置, 错误消息)
+        """
+        async with self._lock:
+            self.logger.debug(f"尝试替换用户歌曲 - 用户: {user.display_name} ({user.id}), 新歌曲: {new_audio_info.title}")
+
+            try:
+                # 安全检查1: 检查歌曲时长限制
+                max_duration = self._get_max_song_duration()
+                if new_audio_info.duration > max_duration:
+                    error_msg = (
+                        f"新歌曲时长 {self._format_duration_string(new_audio_info.duration)} "
+                        f"超过了最大限制 {self._format_duration_string(max_duration)}。"
+                    )
+                    self.logger.info(f"替换歌曲失败 - 时长超限: {error_msg}")
+                    return False, None, error_msg
+
+                # 安全检查2: 防止替换正在播放的歌曲
+                if self._current_song and self._current_song.requester.id == user.id:
+                    error_msg = "无法替换正在播放的歌曲，请等待当前歌曲播放完成。"
+                    self.logger.info(f"替换歌曲失败 - 歌曲正在播放: 用户 {user.display_name}")
+                    return False, None, error_msg
+
+                # 安全检查3: 防止替换即将播放的歌曲（队列第一位）
+                if self._queue and self._queue[0].requester.id == user.id:
+                    error_msg = "无法替换即将播放的歌曲，请等待当前歌曲播放完成。"
+                    self.logger.info(f"替换歌曲失败 - 歌曲即将播放: 用户 {user.display_name}")
+                    return False, None, error_msg
+
+                # 查找用户在队列中的第一首歌曲
+                user_song_index = None
+
+                for i, song in enumerate(self._queue):
+                    if song.requester.id == user.id:
+                        user_song_index = i
+                        break
+
+                if user_song_index is None:
+                    error_msg = "您在队列中没有歌曲可以替换。"
+                    self.logger.info(f"替换歌曲失败 - 用户无歌曲: 用户 {user.display_name}")
+                    return False, None, error_msg
+
+                # 创建新歌曲对象
+                new_song = Song(audio_info=new_audio_info, requester=user)
+
+                # 执行替换操作
+                old_song = self._queue[user_song_index]
+                self._queue[user_song_index] = new_song
+
+                # 更新重复检测器：移除旧歌曲，添加新歌曲
+                self._duplicate_detector.remove_song_for_user(old_song.audio_info, user)
+                self._duplicate_detector.add_song_for_user(new_audio_info, user)
+
+                # 计算队列位置（从1开始）
+                queue_position = user_song_index + 1
+
+                self.logger.info(
+                    f"成功替换用户歌曲 - 用户: {user.display_name}, "
+                    f"位置: {queue_position}, 旧歌曲: {old_song.title}, 新歌曲: {new_song.title}"
+                )
+
+                # 保存状态
+                await self._save_state()
+
+                return True, queue_position, None
+
+            except Exception as e:
+                error_msg = f"替换歌曲时发生错误: {str(e)}"
+                self.logger.error(f"替换用户歌曲时出错: {e}", exc_info=True)
+                return False, None, error_msg
     
     async def clear_queue(self) -> int:
         """

@@ -142,10 +142,15 @@ class IQueueManager(ABC):
     async def skip_current_song(self) -> Optional[SongInfo]:
         """跳过当前歌曲"""
         pass
-    
+
     @abstractmethod
     async def clear_queue(self) -> int:
         """清空队列"""
+        pass
+
+    @abstractmethod
+    async def replace_user_song(self, user: 'discord.Member', new_audio_info: AudioInfo) -> Tuple[bool, Optional[int], Optional[str]]:
+        """替换用户在队列中的第一首歌曲"""
         pass
     
     @abstractmethod

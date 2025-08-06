@@ -8,6 +8,7 @@ from discord.ext import commands
 import sys
 
 from similubot.core.command_registry import CommandRegistry
+from similubot.core.interfaces import AudioInfo
 from similubot.progress.discord_updater import DiscordProgressUpdater
 from similubot.progress.music_progress import MusicProgressBar
 from similubot.utils.config_manager import ConfigManager
@@ -191,7 +192,30 @@ class MusicCommands:
             )
 
             if not success:
-                # 使用统一的错误处理方法
+                # 检查是否为队列公平性错误，如果是则尝试交互式处理
+                if error and ("已经有" in error and "首歌曲在队列中" in error):
+                    # 先获取音频信息用于交互式替换
+                    try:
+                        audio_info = None
+                        if source_type and source_type.value == "youtube":
+                            audio_info = await self.music_player.youtube_client.extract_audio_info(url)
+                        elif source_type and source_type.value == "catbox":
+                            audio_info = await self.music_player.catbox_client.extract_audio_info(url)
+                        elif source_type and source_type.value == "bilibili":
+                            audio_info = await self.music_player.bilibili_client.extract_audio_info(url)
+                        elif source_type and source_type.value == "netease":
+                            audio_info = await self.music_player.netease_client.extract_audio_info(url)
+
+                        if audio_info:
+                            # 尝试交互式队列公平性处理
+                            handled = await self._handle_queue_fairness_interactive(ctx, audio_info, ctx.author)
+
+                            if handled:
+                                return  # 成功处理，直接返回
+                    except Exception as e:
+                        self.logger.warning(f"获取音频信息用于交互式处理失败: {e}")
+
+                # 使用统一的错误处理方法（回退处理）
                 await self._handle_queue_addition_error(response, error, ctx.author)
                 return
 
@@ -1035,6 +1059,139 @@ class MusicCommands:
 
         await message.edit(content=None, embed=embed)
 
+    async def _handle_queue_fairness_interactive(
+        self,
+        ctx: commands.Context,
+        new_audio_info: AudioInfo,
+        user: Union[discord.User, discord.Member]
+    ) -> bool:
+        """
+        处理队列公平性的交互式替换流程
+
+        Args:
+            ctx: Discord命令上下文
+            new_audio_info: 新歌曲的音频信息
+            user: 触发错误的用户
+
+        Returns:
+            是否成功处理（True表示用户选择了替换并成功执行）
+        """
+        try:
+            self.logger.debug(f"开始队列公平性交互流程 - 用户: {user.display_name}, 新歌曲: {new_audio_info.title}")
+
+            # 获取用户当前队列状态
+            if not isinstance(user, discord.Member):
+                self.logger.warning("用户不是服务器成员，无法获取队列状态")
+                return False
+
+            user_queue_service = UserQueueStatusService(self.music_player._playback_engine)
+            user_info = user_queue_service.get_user_queue_info(user, ctx.guild.id)
+
+            if not user_info.has_queued_song:
+                self.logger.warning("用户没有排队歌曲，无法进行替换")
+                return False
+
+            # 创建交互管理器
+            interaction_manager = InteractionManager()
+
+            # 显示替换确认界面
+            result, _ = await interaction_manager.show_queue_fairness_replacement(
+                ctx=ctx,
+                new_song_title=new_audio_info.title,
+                existing_song_title=user_info.queued_song_title or "未知歌曲",
+                queue_position=user_info.queue_position or 1
+            )
+
+            # 处理用户选择
+            if result == InteractionResult.REPLACED:
+                self.logger.debug(f"用户选择替换歌曲: {user.display_name}")
+
+                # 执行歌曲替换
+                queue_manager = self.music_player.get_queue_manager(ctx.guild.id)
+                success, position, error_msg = await queue_manager.replace_user_song(user, new_audio_info)
+
+                if success:
+                    # 替换成功，发送成功消息
+                    embed = discord.Embed(
+                        title="✅ 歌曲替换成功",
+                        description=f"已将您的歌曲替换为 **{new_audio_info.title}**",
+                        color=discord.Color.green()
+                    )
+
+                    embed.add_field(
+                        name="📍 队列位置",
+                        value=f"第 {position} 位",
+                        inline=True
+                    )
+
+                    if hasattr(new_audio_info, 'duration') and new_audio_info.duration:
+                        duration_str = self._format_duration(new_audio_info.duration)
+                        embed.add_field(
+                            name="⏱️ 时长",
+                            value=duration_str,
+                            inline=True
+                        )
+
+                    await ctx.send(embed=embed)
+                    self.logger.info(f"歌曲替换成功 - 用户: {user.display_name}, 位置: {position}")
+                    return True
+                else:
+                    # 替换失败，发送错误消息
+                    embed = discord.Embed(
+                        title="❌ 歌曲替换失败",
+                        description=error_msg or "替换歌曲时发生未知错误",
+                        color=discord.Color.red()
+                    )
+                    await ctx.send(embed=embed)
+                    self.logger.warning(f"歌曲替换失败 - 用户: {user.display_name}, 错误: {error_msg}")
+                    return False
+
+            elif result == InteractionResult.DENIED:
+                self.logger.debug(f"用户拒绝替换歌曲: {user.display_name}")
+                return False
+
+            elif result == InteractionResult.TIMEOUT:
+                self.logger.debug(f"用户替换选择超时: {user.display_name}")
+                return False
+
+            else:
+                self.logger.warning(f"未知的交互结果: {result}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"处理队列公平性交互时出错: {e}", exc_info=True)
+
+            # 发送错误消息
+            embed = discord.Embed(
+                title="❌ 处理失败",
+                description="处理歌曲替换时发生错误，请稍后重试。",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+            return False
+
+    def _format_duration(self, duration_seconds: int) -> str:
+        """
+        格式化时长显示
+
+        Args:
+            duration_seconds: 时长（秒）
+
+        Returns:
+            格式化的时长字符串
+        """
+        if duration_seconds < 60:
+            return f"{duration_seconds}秒"
+        elif duration_seconds < 3600:
+            minutes = duration_seconds // 60
+            seconds = duration_seconds % 60
+            return f"{minutes}:{seconds:02d}"
+        else:
+            hours = duration_seconds // 3600
+            minutes = (duration_seconds % 3600) // 60
+            seconds = duration_seconds % 60
+            return f"{hours}:{minutes:02d}:{seconds:02d}"
+
     async def _send_currently_playing_embed(self, message: discord.Message, error_message: str) -> None:
         """
         Send currently playing error embed message.
@@ -1317,8 +1474,26 @@ class MusicCommands:
                 self.logger.info(f"成功添加网易云歌曲: {search_result.get_display_name()} (位置: {position})")
 
             else:
-                # 添加失败，处理各种错误情况
-                await self._handle_queue_addition_error(ctx, error, ctx.author)
+                # 添加失败，检查是否为队列公平性错误
+                if error and ("已经有" in error and "首歌曲在队列中" in error):
+                    # 创建AudioInfo对象用于交互式替换
+                    audio_info = AudioInfo(
+                        title=search_result.title,
+                        uploader=search_result.artist,
+                        duration=search_result.duration or 0,
+                        url=playback_url,
+                        thumbnail_url=search_result.cover_url
+                    )
+
+                    # 尝试交互式队列公平性处理
+                    handled = await self._handle_queue_fairness_interactive(ctx, audio_info, ctx.author)
+
+                    if not handled:
+                        # 如果交互式处理失败或用户拒绝，回退到传统错误处理
+                        await self._handle_queue_addition_error(ctx, error, ctx.author)
+                else:
+                    # 其他类型的错误，使用传统错误处理
+                    await self._handle_queue_addition_error(ctx, error, ctx.author)
 
         except Exception as e:
             self.logger.error(f"添加网易云歌曲到队列时出错: {e}", exc_info=True)
