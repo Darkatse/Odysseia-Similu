@@ -18,6 +18,8 @@ from urllib.parse import urlparse, parse_qs
 from similubot.core.interfaces import AudioInfo
 from similubot.progress.base import ProgressCallback, ProgressInfo, ProgressStatus
 from similubot.utils.netease_search import get_song_details, get_playback_url
+from similubot.utils.netease_proxy import get_proxy_manager
+from similubot.utils.config_manager import ConfigManager
 from .base import BaseAudioProvider
 
 
@@ -29,15 +31,17 @@ class NetEaseProvider(BaseAudioProvider):
     支持多种网易云音乐URL格式。
     """
     
-    def __init__(self, temp_dir: str = "./temp"):
+    def __init__(self, temp_dir: str = "./temp", config: Optional[ConfigManager] = None):
         """
         初始化网易云音乐提供者
-        
+
         Args:
             temp_dir: 临时文件目录
+            config: 配置管理器实例，用于反向代理配置
         """
         super().__init__("NetEase", temp_dir)
-        
+        self.config = config
+
         # 支持的URL模式
         self.url_patterns = [
             # 官方网易云音乐URL
@@ -50,13 +54,16 @@ class NetEaseProvider(BaseAudioProvider):
             # API代理端点URL（用于播放）
             r'api\.paugram\.com/netease/\?id=(\d+)',
         ]
-        
+
         # 编译正则表达式
         self.compiled_patterns = [re.compile(pattern) for pattern in self.url_patterns]
-        
+
         # 会话超时
         self.timeout = aiohttp.ClientTimeout(total=30)
-        
+
+        # 初始化代理管理器
+        self.proxy_manager = get_proxy_manager(config)
+
         self.logger.debug("网易云音乐提供者初始化完成")
     
     def is_supported_url(self, url: str) -> bool:
@@ -200,8 +207,8 @@ class NetEaseProvider(BaseAudioProvider):
             # 尝试从link字段获取实际播放URL
             playback_url = song_details.get('link')
             if not playback_url:
-                # 回退到API URL
-                playback_url = get_playback_url(song_id, use_api=True)
+                # 回退到API URL，传递配置以支持代理
+                playback_url = get_playback_url(song_id, use_api=True, config=self.config)
 
             # 获取封面URL
             cover_url = song_details.get('cover')
@@ -341,11 +348,14 @@ class NetEaseProvider(BaseAudioProvider):
                 'Referer': 'https://music.163.com/',
             }
 
-            self.logger.debug(f"开始下载NetEase音频: {url}")
+            # 处理代理URL和请求头
+            download_url, proxy_headers = self.proxy_manager.process_url_and_headers(url, headers)
+
+            self.logger.debug(f"开始下载NetEase音频: {download_url}")
 
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
                 # 处理可能的重定向
-                async with session.get(url, headers=headers, allow_redirects=True) as response:
+                async with session.get(download_url, headers=proxy_headers, allow_redirects=True) as response:
                     if response.status != 200:
                         self.logger.error(f"NetEase音频下载请求失败，状态码: {response.status}")
                         self.logger.debug(f"响应头: {dict(response.headers)}")
@@ -363,13 +373,13 @@ class NetEaseProvider(BaseAudioProvider):
                         self.logger.debug(f"响应内容（前500字符）: {response_text[:500]}")
 
                         # 如果是API代理URL返回的错误，尝试使用直接URL
-                        if 'api.paugram.com' in url:
+                        if 'api.paugram.com' in url or 'netease' in url:
                             self.logger.info("API代理URL失败，尝试使用直接URL")
                             # 提取歌曲ID并尝试直接URL
                             song_id = self._extract_song_id_from_api_url(url)
                             if song_id:
                                 from similubot.utils.netease_search import get_playback_url
-                                direct_url = get_playback_url(song_id, use_api=False)
+                                direct_url = get_playback_url(song_id, use_api=False, config=self.config)
                                 self.logger.debug(f"尝试直接URL: {direct_url}")
                                 return await self._download_file(direct_url, file_path, progress_tracker)
 

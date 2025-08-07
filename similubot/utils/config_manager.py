@@ -175,6 +175,108 @@ class ConfigManager:
         """
         return self.get('authorization.notify_admins_on_unauthorized', True)
 
+    # NetEase Proxy Configuration Methods
+    def is_netease_proxy_enabled(self) -> bool:
+        """
+        检查是否启用了网易云音乐反向代理功能
+
+        Returns:
+            如果启用反向代理则返回True
+        """
+        return self.get('netease_proxy.enabled', False)
+
+    def get_netease_proxy_domain(self) -> Optional[str]:
+        """
+        获取网易云音乐反向代理域名
+
+        Returns:
+            代理域名，如果未配置则返回None
+        """
+        domain = self.get('netease_proxy.proxy_domain', '')
+        return domain.strip() if domain else None
+
+    def should_use_https_for_proxy(self) -> bool:
+        """
+        检查代理请求是否应该使用HTTPS
+
+        Returns:
+            如果应该使用HTTPS则返回True
+        """
+        return self.get('netease_proxy.use_https', False)
+
+    def get_netease_domain_mapping(self) -> Dict[str, str]:
+        """
+        获取网易云音乐域名映射配置
+
+        Returns:
+            域名映射字典，键为原始域名，值为目标域名
+        """
+        mapping = self.get('netease_proxy.domain_mapping', {})
+        if not isinstance(mapping, dict):
+            self.logger.warning("域名映射配置格式错误，使用默认配置")
+            return {}
+
+        # 过滤掉空值，使用默认代理域名
+        proxy_domain = self.get_netease_proxy_domain()
+        result = {}
+
+        for original_domain, target_domain in mapping.items():
+            if target_domain and target_domain.strip():
+                result[original_domain] = target_domain.strip()
+            elif proxy_domain:
+                result[original_domain] = proxy_domain
+
+        return result
+
+    def should_preserve_referer(self) -> bool:
+        """
+        检查是否应该保持原始Referer头
+
+        Returns:
+            如果应该保持原始Referer则返回True
+        """
+        return self.get('netease_proxy.headers.preserve_referer', True)
+
+    def should_preserve_host(self) -> bool:
+        """
+        检查是否应该保持原始Host头
+
+        Returns:
+            如果应该保持原始Host则返回True
+        """
+        return self.get('netease_proxy.headers.preserve_host', False)
+
+    def get_netease_proxy_custom_headers(self) -> Dict[str, str]:
+        """
+        获取自定义代理请求头
+
+        Returns:
+            自定义请求头字典
+        """
+        headers = self.get('netease_proxy.headers.custom_headers', {})
+        if not isinstance(headers, dict):
+            self.logger.warning("自定义请求头配置格式错误，使用空字典")
+            return {}
+        return headers
+
+    def should_log_domain_replacement(self) -> bool:
+        """
+        检查是否应该记录域名替换的详细日志
+
+        Returns:
+            如果应该记录域名替换日志则返回True
+        """
+        return self.get('netease_proxy.debug.log_domain_replacement', True)
+
+    def should_log_proxy_requests(self) -> bool:
+        """
+        检查是否应该记录代理请求的详细信息
+
+        Returns:
+            如果应该记录代理请求日志则返回True
+        """
+        return self.get('netease_proxy.debug.log_proxy_requests', False)
+
     # Music Configuration Methods
     def is_music_enabled(self) -> bool:
         """

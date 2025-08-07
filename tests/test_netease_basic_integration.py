@@ -99,20 +99,21 @@ class TestBasicNetEaseIntegration:
     def test_netease_search_client_initialization(self):
         """测试NetEase搜索客户端初始化"""
         client = NetEaseSearchClient()
-        
+
         assert client.search_api == "http://music.163.com/api/search/get"
         assert client.song_detail_api == "https://api.paugram.com/netease/"
         assert client.timeout.total == 10
+        assert client.proxy_manager is not None
 
     def test_netease_search_client_url_generation(self):
         """测试NetEase搜索客户端URL生成"""
         client = NetEaseSearchClient()
-        
-        # 测试API URL
+
+        # 测试API URL（代理功能禁用时应该返回原始URL）
         api_url = client.get_playback_url("517567145", use_api=True)
         assert api_url == "https://api.paugram.com/netease/?id=517567145"
-        
-        # 测试直接URL
+
+        # 测试直接URL（代理功能禁用时应该返回原始URL）
         direct_url = client.get_playback_url("517567145", use_api=False)
         assert direct_url == "https://music.163.com/song/media/outer/url?id=517567145.mp3"
 
@@ -268,7 +269,7 @@ class TestBasicNetEaseIntegration:
         extracted_id = provider._extract_song_id(netease_url)
         assert extracted_id == search_result.song_id
         
-        # 5. 生成播放URL
+        # 5. 生成播放URL（代理功能禁用时应该返回原始URL）
         client = NetEaseSearchClient()
         playback_url = client.get_playback_url(search_result.song_id, use_api=True)
         assert playback_url == f"https://api.paugram.com/netease/?id={search_result.song_id}"

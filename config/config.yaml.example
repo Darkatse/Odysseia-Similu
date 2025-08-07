@@ -104,6 +104,56 @@ duplicate_detection:
   # 最小值: 1
   queue_length_threshold: 5
 
+# 网易云音乐反向代理配置
+netease_proxy:
+  # 是否启用反向代理功能
+  # 设置为 true 时，所有网易云音乐请求将通过配置的代理域名进行
+  # 用于解决海外部署时的版权限制问题
+  enabled: false  # 默认禁用，需要时手动启用
+
+  # 反向代理服务器域名
+  # 将替换所有网易云音乐相关域名（music.163.com, music.126.net等）
+  # 示例：如果设置为 "proxy.example.com"，则：
+  # - https://music.163.com/api/search/get -> http://proxy.example.com/api/search/get
+  # - https://music.163.com/song/media/outer/url?id=123 -> http://proxy.example.com/song/media/outer/url?id=123
+  # - https://api.paugram.com/netease/?id=123 -> http://proxy.example.com/netease/?id=123
+  proxy_domain: ""  # 留空则使用原始域名
+
+  # 代理协议设置
+  # 某些反向代理服务器可能只支持HTTP而不支持HTTPS
+  use_https: false  # 设置为 false 使用 HTTP，true 使用 HTTPS
+
+  # 域名映射配置
+  # 定义具体的域名替换规则，支持更精细的控制
+  domain_mapping:
+    # 网易云音乐主域名
+    "music.163.com": ""  # 留空则使用 proxy_domain
+    "music.126.net": ""  # 留空则使用 proxy_domain
+    "y.music.163.com": ""  # 留空则使用 proxy_domain
+
+    # 第三方API代理域名
+    "api.paugram.com": ""  # 留空则使用 proxy_domain
+
+  # 请求头配置
+  # 某些代理服务器可能需要特定的请求头
+  headers:
+    # 是否保持原始Referer头
+    preserve_referer: true
+    # 是否保持原始Host头
+    preserve_host: false  # 通常设置为false以使用代理域名
+    # 自定义请求头（可选）
+    custom_headers: {}
+      # 示例：
+      # "X-Forwarded-For": "original-client-ip"
+      # "X-Real-IP": "original-client-ip"
+
+  # 调试和日志配置
+  debug:
+    # 是否记录域名替换的详细日志
+    log_domain_replacement: true
+    # 是否记录代理请求的详细信息
+    log_proxy_requests: false  # 可能包含敏感信息，生产环境建议关闭
+
 # 日志配置
 logging:
   level: "INFO"  # 日志级别选项：DEBUG、INFO、WARNING、ERROR、CRITICAL

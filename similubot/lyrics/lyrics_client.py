@@ -9,6 +9,8 @@ from urllib.parse import quote
 
 # 延迟导入以避免循环依赖
 # from similubot.utils.netease_search import search_song_id, search_and_get_lyrics
+from similubot.utils.netease_proxy import get_proxy_manager
+from similubot.utils.config_manager import ConfigManager
 
 
 class NetEaseCloudMusicClient:
@@ -18,9 +20,15 @@ class NetEaseCloudMusicClient:
     提供歌曲搜索和歌词获取功能，使用第三方API端点。
     """
 
-    def __init__(self):
-        """初始化网易云音乐客户端"""
+    def __init__(self, config: Optional[ConfigManager] = None):
+        """
+        初始化网易云音乐客户端
+
+        Args:
+            config: 配置管理器实例，用于反向代理配置
+        """
         self.logger = logging.getLogger("similubot.lyrics.lyrics_client")
+        self.config = config
 
         # API端点
         self.search_api = "http://music.163.com/api/search/get"
@@ -35,6 +43,9 @@ class NetEaseCloudMusicClient:
 
         # 会话超时
         self.timeout = aiohttp.ClientTimeout(total=10)
+
+        # 初始化代理管理器
+        self.proxy_manager = get_proxy_manager(config)
 
         self.logger.debug("网易云音乐客户端初始化完成")
 
@@ -76,8 +87,13 @@ class NetEaseCloudMusicClient:
 
             url = f"{self.lyrics_api}?id={song_id}"
 
+            # 处理代理URL和请求头
+            lyrics_url, proxy_headers = self.proxy_manager.process_url_and_headers(url, self.headers)
+
+            self.logger.debug(f"歌词API URL: {lyrics_url}")
+
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.get(url) as response:
+                async with session.get(lyrics_url, headers=proxy_headers) as response:
                     if response.status != 200:
                         self.logger.warning(f"歌词API返回状态 {response.status}")
                         return None

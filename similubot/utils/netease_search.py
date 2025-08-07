@@ -16,6 +16,8 @@ from typing import Optional, List, Dict, Any
 from urllib.parse import quote
 
 from similubot.core.interfaces import NetEaseSearchResult
+from similubot.utils.netease_proxy import get_proxy_manager
+from similubot.utils.config_manager import ConfigManager
 
 
 class NetEaseSearchClient:
@@ -26,9 +28,15 @@ class NetEaseSearchClient:
     从原有歌词客户端中提取并优化，专注于搜索功能。
     """
 
-    def __init__(self):
-        """初始化网易云音乐搜索客户端"""
+    def __init__(self, config: Optional[ConfigManager] = None):
+        """
+        初始化网易云音乐搜索客户端
+
+        Args:
+            config: 配置管理器实例，用于反向代理配置
+        """
         self.logger = logging.getLogger("similubot.utils.netease_search")
+        self.config = config
 
         # API端点
         self.search_api = "http://music.163.com/api/search/get"
@@ -43,6 +51,9 @@ class NetEaseSearchClient:
 
         # 会话超时
         self.timeout = aiohttp.ClientTimeout(total=10)
+
+        # 初始化代理管理器
+        self.proxy_manager = get_proxy_manager(config)
 
         self.logger.debug("网易云音乐搜索客户端初始化完成")
 
@@ -69,11 +80,18 @@ class NetEaseSearchClient:
                 'limit': max(limit, 10),  # 获取更多结果以便筛选
             }
 
+            # 处理代理URL和请求头
+            search_url, proxy_headers = self.proxy_manager.process_url_and_headers(
+                self.search_api, self.headers
+            )
+
+            self.logger.debug(f"搜索API URL: {search_url}")
+
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
                 async with session.get(
-                    self.search_api,
+                    search_url,
                     params=params,
-                    headers=self.headers
+                    headers=proxy_headers
                 ) as response:
                     if response.status != 200:
                         self.logger.warning(f"搜索请求失败，状态码: {response.status}")
@@ -153,9 +171,16 @@ class NetEaseSearchClient:
             
             # 构建API URL
             api_url = f"{self.song_detail_api}?id={song_id}"
-            
+
+            # 处理代理URL和请求头
+            detail_url, proxy_headers = self.proxy_manager.process_url_and_headers(
+                api_url, self.headers
+            )
+
+            self.logger.debug(f"歌曲详情API URL: {detail_url}")
+
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.get(api_url) as response:
+                async with session.get(detail_url, headers=proxy_headers) as response:
                     if response.status != 200:
                         self.logger.warning(f"获取歌曲详情失败，状态码: {response.status}")
                         return None
@@ -270,34 +295,43 @@ class NetEaseSearchClient:
     def get_playback_url(self, song_id: str, use_api: bool = True) -> str:
         """
         获取歌曲播放URL
-        
+
         Args:
             song_id: 歌曲ID
             use_api: 是否使用API端点（默认True），False则使用直接链接
-            
+
         Returns:
-            播放URL
+            播放URL（已处理代理域名替换）
         """
         if use_api:
-            return f"https://api.paugram.com/netease/?id={song_id}"
+            original_url = f"https://api.paugram.com/netease/?id={song_id}"
         else:
-            return f"https://music.163.com/song/media/outer/url?id={song_id}.mp3"
+            original_url = f"https://music.163.com/song/media/outer/url?id={song_id}.mp3"
+
+        # 应用代理域名替换
+        proxy_url = self.proxy_manager.replace_domain_in_url(original_url)
+
+        self.logger.debug(f"播放URL生成: {original_url} -> {proxy_url}")
+        return proxy_url
 
 
 # 全局搜索客户端实例
 _search_client: Optional[NetEaseSearchClient] = None
 
 
-def get_search_client() -> NetEaseSearchClient:
+def get_search_client(config: Optional[ConfigManager] = None) -> NetEaseSearchClient:
     """
     获取全局搜索客户端实例
-    
+
+    Args:
+        config: 配置管理器实例，用于反向代理配置
+
     Returns:
         搜索客户端实例
     """
     global _search_client
     if _search_client is None:
-        _search_client = NetEaseSearchClient()
+        _search_client = NetEaseSearchClient(config)
     return _search_client
 
 
@@ -391,16 +425,17 @@ async def search_and_get_lyrics(song_title: str, artist: str = "") -> Optional[D
         return None
 
 
-def get_playback_url(song_id: str, use_api: bool = True) -> str:
+def get_playback_url(song_id: str, use_api: bool = True, config: Optional[ConfigManager] = None) -> str:
     """
     获取播放URL的便捷函数
-    
+
     Args:
         song_id: 歌曲ID
         use_api: 是否使用API端点
-        
+        config: 配置管理器实例，用于反向代理配置
+
     Returns:
-        播放URL
+        播放URL（已处理代理域名替换）
     """
-    client = get_search_client()
+    client = get_search_client(config)
     return client.get_playback_url(song_id, use_api)
