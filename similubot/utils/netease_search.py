@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 from similubot.core.interfaces import NetEaseSearchResult
 from similubot.utils.netease_proxy import get_proxy_manager
+from similubot.utils.netease_member import get_member_auth
 from similubot.utils.config_manager import ConfigManager
 
 
@@ -54,6 +55,9 @@ class NetEaseSearchClient:
 
         # 初始化代理管理器
         self.proxy_manager = get_proxy_manager(config)
+
+        # 初始化会员认证管理器
+        self.member_auth = get_member_auth(config)
 
         self.logger.debug("网易云音乐搜索客户端初始化完成")
 
@@ -313,6 +317,32 @@ class NetEaseSearchClient:
 
         self.logger.debug(f"播放URL生成: {original_url} -> {proxy_url}")
         return proxy_url
+
+    async def get_member_playback_url(self, song_id: str, quality_level: Optional[str] = None) -> Optional[str]:
+        """
+        获取会员播放URL（如果启用会员功能）
+
+        Args:
+            song_id: 歌曲ID
+            quality_level: 音频质量等级，如果为None则使用默认配置
+
+        Returns:
+            会员播放URL，如果获取失败或未启用会员功能则返回None
+        """
+        if not self.member_auth.is_enabled():
+            return None
+
+        try:
+            member_url = await self.member_auth.get_member_audio_url(song_id, quality_level)
+            if member_url:
+                self.logger.debug(f"获取会员播放URL成功: {song_id}")
+                return member_url
+            else:
+                self.logger.debug(f"会员播放URL获取失败: {song_id}")
+        except Exception as e:
+            self.logger.warning(f"获取会员播放URL时出错: {e}")
+
+        return None
 
 
 # 全局搜索客户端实例

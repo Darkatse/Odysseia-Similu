@@ -177,9 +177,15 @@ class NetEaseProxyManager:
             domain_mapping = self.get_domain_mapping()
             target_domain = None
             
-            # 查找精确匹配的域名映射
+            # 查找域名映射（支持精确匹配和子域名匹配）
             for source_domain, mapped_domain in domain_mapping.items():
-                if domain_without_port == source_domain.lower():
+                source_lower = source_domain.lower()
+                # 精确匹配
+                if domain_without_port == source_lower:
+                    target_domain = mapped_domain
+                    break
+                # 子域名匹配（例如 m801.music.126.net 匹配 music.126.net）
+                elif domain_without_port.endswith('.' + source_lower):
                     target_domain = mapped_domain
                     break
             
@@ -189,6 +195,29 @@ class NetEaseProxyManager:
             
             if not target_domain:
                 self.logger.debug(f"未配置代理域名，保持原始URL: {url}")
+                return url
+
+            # 检查是否为自映射（直连配置）
+            # 需要检查两种情况：
+            # 1. 精确匹配：domain_without_port == target_domain
+            # 2. 子域名匹配：子域名映射到父域名，且父域名配置为自映射
+            target_lower = target_domain.lower()
+            is_self_mapping = False
+
+            if domain_without_port == target_lower:
+                # 精确匹配的自映射
+                is_self_mapping = True
+            elif domain_without_port.endswith('.' + target_lower):
+                # 子域名匹配到父域名，且父域名配置为自映射
+                # 检查父域名是否配置为自映射
+                domain_mapping = self.get_domain_mapping()
+                parent_mapping = domain_mapping.get(target_lower)
+                if parent_mapping and parent_mapping.lower() == target_lower:
+                    is_self_mapping = True
+
+            if is_self_mapping:
+                if self.config.should_log_domain_replacement():
+                    self.logger.debug(f"检测到直连配置 ({domain_without_port} -> {target_domain})，保持原始URL: {url}")
                 return url
             
             # 构建新的URL

@@ -277,6 +277,202 @@ class ConfigManager:
         """
         return self.get('netease_proxy.debug.log_proxy_requests', False)
 
+    # NetEase Member Authentication Configuration Methods
+    def is_netease_member_enabled(self) -> bool:
+        """
+        检查是否启用了网易云音乐会员认证功能
+
+        Returns:
+            如果启用会员认证则返回True
+        """
+        return self.get('netease_member.enabled', False)
+
+    def get_netease_member_music_u(self) -> Optional[str]:
+        """
+        获取网易云音乐会员MUSIC_U Cookie
+
+        Returns:
+            MUSIC_U Cookie值，如果未配置则返回None
+        """
+        music_u = self.get('netease_member.cookies.MUSIC_U', '')
+        return music_u.strip() if music_u else None
+
+    def get_netease_member_csrf_token(self) -> Optional[str]:
+        """
+        获取网易云音乐会员CSRF令牌
+
+        Returns:
+            CSRF令牌，如果未配置则返回None
+        """
+        csrf = self.get('netease_member.cookies.__csrf', '')
+        return csrf.strip() if csrf else None
+
+    def get_netease_member_additional_cookies(self) -> Dict[str, str]:
+        """
+        获取网易云音乐会员额外Cookie
+
+        Returns:
+            额外Cookie字典
+        """
+        cookies = self.get('netease_member.cookies.additional_cookies', {})
+        if not isinstance(cookies, dict):
+            self.logger.warning("额外Cookie配置格式错误，使用空字典")
+            return {}
+        return cookies
+
+    def get_netease_member_default_quality(self) -> str:
+        """
+        获取网易云音乐会员默认音频质量等级
+
+        Returns:
+            音频质量等级字符串
+        """
+        return self.get('netease_member.audio_quality.default_level', 'exhigh')
+
+    def get_netease_member_preferred_format(self) -> str:
+        """
+        获取网易云音乐会员偏好音频格式
+
+        Returns:
+            音频格式字符串
+        """
+        return self.get('netease_member.audio_quality.preferred_format', 'aac')
+
+    def should_netease_member_auto_fallback(self) -> bool:
+        """
+        检查是否应该自动降级音质
+
+        Returns:
+            如果应该自动降级则返回True
+        """
+        return self.get('netease_member.audio_quality.auto_fallback', True)
+
+    def get_netease_member_validity_check_interval(self) -> int:
+        """
+        获取Cookie有效性检查间隔
+
+        Returns:
+            检查间隔秒数
+        """
+        return self.get('netease_member.authentication.validity_check_interval', 3600)
+
+    def should_netease_member_auto_disable_on_invalid(self) -> bool:
+        """
+        检查是否在Cookie失效时自动禁用会员功能
+
+        Returns:
+            如果应该自动禁用则返回True
+        """
+        return self.get('netease_member.authentication.auto_disable_on_invalid', True)
+
+    def get_netease_member_max_retry_attempts(self) -> int:
+        """
+        获取会员API调用最大重试次数
+
+        Returns:
+            最大重试次数
+        """
+        return self.get('netease_member.authentication.max_retry_attempts', 3)
+
+    def get_netease_member_retry_interval(self) -> int:
+        """
+        获取会员API调用重试间隔
+
+        Returns:
+            重试间隔秒数
+        """
+        return self.get('netease_member.authentication.retry_interval', 2)
+
+    def is_netease_member_cache_enabled(self) -> bool:
+        """
+        检查是否启用会员信息缓存
+
+        Returns:
+            如果启用缓存则返回True
+        """
+        return self.get('netease_member.cache.enabled', True)
+
+    def get_netease_member_cache_expiry_time(self) -> int:
+        """
+        获取会员信息缓存过期时间
+
+        Returns:
+            缓存过期时间秒数
+        """
+        return self.get('netease_member.cache.expiry_time', 1800)
+
+    def should_netease_member_cache_audio_urls(self) -> bool:
+        """
+        检查是否缓存音频URL
+
+        Returns:
+            如果应该缓存音频URL则返回True
+        """
+        return self.get('netease_member.cache.cache_audio_urls', True)
+
+    def get_netease_member_audio_url_expiry(self) -> int:
+        """
+        获取音频URL缓存过期时间
+
+        Returns:
+            音频URL缓存过期时间秒数
+        """
+        return self.get('netease_member.cache.audio_url_expiry', 300)
+
+    def should_log_netease_member_authentication(self) -> bool:
+        """
+        检查是否记录会员认证相关日志
+
+        Returns:
+            如果应该记录认证日志则返回True
+        """
+        return self.get('netease_member.debug.log_authentication', True)
+
+    def should_log_netease_member_quality_selection(self) -> bool:
+        """
+        检查是否记录音频质量选择过程
+
+        Returns:
+            如果应该记录质量选择日志则返回True
+        """
+        return self.get('netease_member.debug.log_quality_selection', True)
+
+    def should_log_netease_member_cookie_usage(self) -> bool:
+        """
+        检查是否记录Cookie使用情况
+
+        Returns:
+            如果应该记录Cookie使用日志则返回True
+        """
+        return self.get('netease_member.debug.log_cookie_usage', False)
+
+    def should_mask_netease_member_sensitive_data(self) -> bool:
+        """
+        检查是否在日志中隐藏敏感信息
+
+        Returns:
+            如果应该隐藏敏感信息则返回True
+        """
+        return self.get('netease_member.debug.mask_sensitive_data', True)
+
+    def should_netease_member_fallback_to_free(self) -> bool:
+        """
+        检查是否与免费用户功能兼容
+
+        Returns:
+            如果应该回退到免费模式则返回True
+        """
+        return self.get('netease_member.compatibility.fallback_to_free', True)
+
+    def get_netease_member_error_handling(self) -> str:
+        """
+        获取错误处理策略
+
+        Returns:
+            错误处理策略字符串 (silent/notify/strict)
+        """
+        return self.get('netease_member.compatibility.error_handling', 'notify')
+
     # Music Configuration Methods
     def is_music_enabled(self) -> bool:
         """

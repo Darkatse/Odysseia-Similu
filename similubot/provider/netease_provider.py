@@ -12,13 +12,14 @@ import asyncio
 import aiohttp
 import os
 import re
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 from urllib.parse import urlparse, parse_qs
 
 from similubot.core.interfaces import AudioInfo
 from similubot.progress.base import ProgressCallback, ProgressInfo, ProgressStatus
 from similubot.utils.netease_search import get_song_details, get_playback_url
 from similubot.utils.netease_proxy import get_proxy_manager
+from similubot.utils.netease_member import get_member_auth
 from similubot.utils.config_manager import ConfigManager
 from .base import BaseAudioProvider
 
@@ -53,6 +54,10 @@ class NetEaseProvider(BaseAudioProvider):
             r'music\.163\.com/song/media/outer/url\?id=(\d+)',
             # API代理端点URL（用于播放）
             r'api\.paugram\.com/netease/\?id=(\d+)',
+            # 会员音频直链URL（支持所有music.126.net子域名）
+            r'[a-z0-9]+\.music\.126\.net/.+\.(mp3|flac|m4a|aac)',
+            # 网易云音乐CDN直链（备用）
+            r'music\.126\.net/.+\.(mp3|flac|m4a|aac)',
         ]
 
         # 编译正则表达式
@@ -63,6 +68,12 @@ class NetEaseProvider(BaseAudioProvider):
 
         # 初始化代理管理器
         self.proxy_manager = get_proxy_manager(config)
+
+        # 初始化会员认证管理器
+        self.member_auth = get_member_auth(config)
+
+        # URL到歌曲ID的映射缓存（用于直接音频URL的元数据提取）
+        self._url_song_id_cache = {}
 
         self.logger.debug("网易云音乐提供者初始化完成")
     
@@ -89,22 +100,28 @@ class NetEaseProvider(BaseAudioProvider):
     def _extract_song_id(self, url: str) -> Optional[str]:
         """
         从URL中提取歌曲ID
-        
+
         Args:
             url: 网易云音乐URL
-            
+
         Returns:
             歌曲ID，提取失败时返回None
         """
         try:
-            # 尝试所有模式
-            for pattern in self.compiled_patterns:
+            # 尝试所有模式（前6个模式包含歌曲ID）
+            for i, pattern in enumerate(self.compiled_patterns):
                 match = pattern.search(url)
                 if match:
-                    song_id = match.group(1)
-                    self.logger.debug(f"从URL提取歌曲ID: {song_id}")
-                    return song_id
-            
+                    # 前6个模式包含歌曲ID
+                    if i < 6:
+                        song_id = match.group(1)
+                        self.logger.debug(f"从URL提取歌曲ID: {song_id}")
+                        return song_id
+                    else:
+                        # 直接音频URL，没有歌曲ID
+                        self.logger.debug(f"检测到直接音频URL，无歌曲ID: {url}")
+                        return None
+
             # 如果正则匹配失败，尝试解析查询参数
             parsed = urlparse(url)
             if parsed.query:
@@ -113,12 +130,269 @@ class NetEaseProvider(BaseAudioProvider):
                     song_id = query_params['id'][0]
                     self.logger.debug(f"从查询参数提取歌曲ID: {song_id}")
                     return song_id
-            
+
             self.logger.warning(f"无法从URL提取歌曲ID: {url}")
             return None
-            
+
         except Exception as e:
             self.logger.error(f"提取歌曲ID时出错: {e}")
+            return None
+
+    def _is_direct_audio_url(self, url: str) -> bool:
+        """
+        检查是否为直接音频URL（会员音频链接）
+
+        Args:
+            url: 要检查的URL
+
+        Returns:
+            如果是直接音频URL则返回True
+        """
+        # 检查最后两个模式（直接音频URL）
+        for pattern in self.compiled_patterns[-2:]:
+            if pattern.search(url):
+                return True
+        return False
+
+    def _extract_metadata_from_direct_url(self, url: str, song_id: Optional[str] = None) -> tuple:
+        """
+        从直接音频URL中提取基本元数据
+
+        Args:
+            url: 直接音频URL
+            song_id: 关联的歌曲ID（如果有）
+
+        Returns:
+            (title, artist, duration, song_id) 元组
+        """
+        try:
+            parsed = urlparse(url)
+
+            # 从文件路径提取信息
+            path_parts = parsed.path.split('/')
+            filename = path_parts[-1] if path_parts else "unknown"
+
+            # 移除文件扩展名和查询参数
+            title = os.path.splitext(filename)[0]
+
+            # 如果提供了歌曲ID，优先使用它
+            if song_id:
+                self.logger.debug(f"使用提供的歌曲ID: {song_id}")
+                return title, "网易云音乐", 0, song_id
+
+            # 尝试从URL路径中提取可能的歌曲ID
+            # 网易云音乐的直接URL有时在路径中包含歌曲ID
+            for part in path_parts:
+                if part.isdigit() and len(part) >= 6:  # 歌曲ID通常是6位以上的数字
+                    potential_song_id = part
+                    self.logger.debug(f"从URL路径提取到潜在歌曲ID: {potential_song_id}")
+                    return title, "网易云音乐", 0, potential_song_id
+
+            # 如果标题是哈希值或无意义字符串，使用默认值
+            if len(title) > 32 or not any(c.isalpha() for c in title):
+                title = "网易云音乐会员音频"
+
+            return title, "网易云音乐", 0, None
+
+        except Exception as e:
+            self.logger.warning(f"从直接URL提取元数据失败: {e}")
+            return "网易云音乐会员音频", "网易云音乐", 0, None
+
+    async def _get_song_metadata_by_id(self, song_id: str) -> Optional[Dict[str, Any]]:
+        """
+        通过歌曲ID获取完整的歌曲元数据
+
+        Args:
+            song_id: 歌曲ID
+
+        Returns:
+            歌曲元数据字典，包含title、artist、duration等信息
+        """
+        try:
+            # 使用现有的歌曲详情API
+            song_details = await get_song_details(song_id)
+            if not song_details:
+                self.logger.warning(f"无法获取歌曲详情: {song_id}")
+                return None
+
+            # 提取基本信息
+            title = song_details.get('title', '未知歌曲')
+            artist = song_details.get('artist', '未知艺术家')
+
+            # 获取时长信息 - 通过搜索API获取更准确的时长
+            duration = await self._get_song_duration(song_id, title, artist)
+
+            # 构建完整的元数据
+            metadata = {
+                'song_id': song_id,
+                'title': title,
+                'artist': artist,
+                'duration': duration,
+                'cover_url': song_details.get('cover_url'),
+                'album': song_details.get('album'),
+                'source': 'NetEase'
+            }
+
+            self.logger.debug(f"获取歌曲元数据成功: {title} - {artist} (ID: {song_id})")
+            return metadata
+
+        except Exception as e:
+            self.logger.error(f"获取歌曲元数据失败 (ID: {song_id}): {e}")
+            return None
+
+    async def _extract_audio_info_from_direct_url(self, url: str, context_song_id: Optional[str] = None) -> Optional[AudioInfo]:
+        """
+        从直接音频URL提取音频信息（会员音频链接）
+
+        Args:
+            url: 直接音频URL
+            context_song_id: 上下文中的歌曲ID（来自会员认证系统）
+
+        Returns:
+            音频信息，失败时返回None
+        """
+        try:
+            # 首先尝试从URL和上下文提取基本元数据
+            title, artist, duration, extracted_song_id = self._extract_metadata_from_direct_url(url, context_song_id)
+
+            # 确定要使用的歌曲ID（优先使用上下文ID）
+            song_id = context_song_id or extracted_song_id
+
+            # 如果有歌曲ID，尝试获取完整的元数据
+            if song_id:
+                self.logger.debug(f"尝试通过歌曲ID获取完整元数据: {song_id}")
+                metadata = await self._get_song_metadata_by_id(song_id)
+
+                if metadata:
+                    # 使用API获取的完整元数据
+                    title = metadata['title']
+                    artist = metadata['artist']
+                    duration = metadata['duration']
+                    thumbnail_url = metadata.get('cover_url')
+                    self.logger.debug(f"使用API元数据: {title} - {artist}")
+                else:
+                    # API失败，使用基本元数据
+                    thumbnail_url = None
+                    self.logger.debug(f"API获取元数据失败，使用基本元数据: {title} - {artist}")
+            else:
+                # 没有歌曲ID，只能使用基本元数据
+                thumbnail_url = None
+                self.logger.debug(f"无歌曲ID，使用基本元数据: {title} - {artist}")
+
+            # 处理代理URL（重要：在创建AudioInfo之前处理）
+            processed_url = self._process_direct_url_for_proxy(url)
+
+            # 创建音频信息对象
+            audio_info = AudioInfo(
+                title=title,
+                uploader=artist,  # AudioInfo使用uploader字段而不是artist
+                duration=duration,
+                url=processed_url,  # 使用处理后的URL
+                thumbnail_url=thumbnail_url
+            )
+
+            self.logger.debug(f"从直接URL提取音频信息成功: {title} - {artist}")
+            return audio_info
+
+        except Exception as e:
+            self.logger.error(f"从直接URL提取音频信息失败: {e}")
+            return None
+
+    def _process_direct_url_for_proxy(self, url: str) -> str:
+        """
+        为直接音频URL处理代理配置
+
+        Args:
+            url: 原始直接音频URL
+
+        Returns:
+            处理后的URL
+        """
+        try:
+            # 检查是否启用了代理
+            if not self.proxy_manager.is_enabled():
+                self.logger.debug("代理未启用，保持原始URL")
+                return url
+
+            # 获取域名映射配置
+            domain_mapping = self.proxy_manager.get_domain_mapping()
+            parsed = urlparse(url)
+            original_domain = parsed.netloc.lower().split(':')[0]  # 移除端口号
+
+            # 检查是否有针对music.126.net的特定配置
+            mapped_domain = None
+            for source_domain, target_domain in domain_mapping.items():
+                if original_domain == source_domain.lower():
+                    mapped_domain = target_domain
+                    break
+
+            # 如果映射的域名与原域名相同，说明配置为直连
+            if mapped_domain and mapped_domain.lower() == original_domain:
+                self.logger.debug(f"域名 {original_domain} 配置为直连，保持原始URL")
+                return url
+
+            # 应用代理域名替换
+            processed_url = self.proxy_manager.replace_domain_in_url(url)
+
+            if processed_url != url:
+                self.logger.debug(f"应用代理配置: {url[:60]}... -> {processed_url[:60]}...")
+            else:
+                self.logger.debug("代理配置未改变URL")
+
+            return processed_url
+
+        except Exception as e:
+            self.logger.error(f"处理直接URL代理配置时出错: {e}")
+            return url
+
+    def _cache_url_song_id_mapping(self, url: str, song_id: str):
+        """
+        缓存URL到歌曲ID的映射
+
+        Args:
+            url: 音频URL
+            song_id: 对应的歌曲ID
+        """
+        try:
+            # 使用URL的主要部分作为键（去除查询参数中的时效性参数）
+            parsed = urlparse(url)
+            cache_key = f"{parsed.netloc}{parsed.path}"
+
+            self._url_song_id_cache[cache_key] = song_id
+            self.logger.debug(f"缓存URL到歌曲ID映射: {cache_key[:50]}... -> {song_id}")
+
+            # 限制缓存大小，避免内存泄漏
+            if len(self._url_song_id_cache) > 1000:
+                # 移除最旧的一半条目
+                items = list(self._url_song_id_cache.items())
+                self._url_song_id_cache = dict(items[500:])
+                self.logger.debug("清理URL歌曲ID缓存")
+
+        except Exception as e:
+            self.logger.warning(f"缓存URL歌曲ID映射时出错: {e}")
+
+    def _get_cached_song_id(self, url: str) -> Optional[str]:
+        """
+        从缓存中获取URL对应的歌曲ID
+
+        Args:
+            url: 音频URL
+
+        Returns:
+            歌曲ID，如果未找到则返回None
+        """
+        try:
+            parsed = urlparse(url)
+            cache_key = f"{parsed.netloc}{parsed.path}"
+
+            song_id = self._url_song_id_cache.get(cache_key)
+            if song_id:
+                self.logger.debug(f"从缓存获取歌曲ID: {cache_key[:50]}... -> {song_id}")
+
+            return song_id
+
+        except Exception as e:
+            self.logger.warning(f"从缓存获取歌曲ID时出错: {e}")
             return None
 
     async def _get_song_duration(self, song_id: str, title: str, artist: str) -> int:
@@ -178,14 +452,20 @@ class NetEaseProvider(BaseAudioProvider):
     async def _extract_audio_info_impl(self, url: str) -> Optional[AudioInfo]:
         """
         从网易云音乐URL提取音频信息
-        
+
         Args:
             url: 网易云音乐URL
-            
+
         Returns:
             音频信息，失败时返回None
         """
         try:
+            # 检查是否为直接音频URL
+            if self._is_direct_audio_url(url):
+                # 尝试从缓存获取关联的歌曲ID
+                cached_song_id = self._get_cached_song_id(url)
+                return await self._extract_audio_info_from_direct_url(url, cached_song_id)
+
             # 提取歌曲ID
             song_id = self._extract_song_id(url)
             if not song_id:
@@ -204,11 +484,28 @@ class NetEaseProvider(BaseAudioProvider):
             # 获取时长信息 - 歌曲详情API不包含时长，需要通过搜索获取
             duration = await self._get_song_duration(song_id, title, artist)
 
-            # 尝试从link字段获取实际播放URL
-            playback_url = song_details.get('link')
+            # 尝试获取会员音频URL（如果启用会员功能）
+            playback_url = None
+            if self.member_auth.is_enabled():
+                try:
+                    member_url = await self.member_auth.get_member_audio_url(song_id)
+                    if member_url:
+                        playback_url = member_url
+                        # 缓存URL到歌曲ID的映射，用于后续的元数据提取
+                        self._cache_url_song_id_mapping(member_url, song_id)
+                        self.logger.debug(f"使用会员音频URL: {song_id}")
+                    else:
+                        self.logger.debug(f"会员音频URL获取失败，回退到免费模式: {song_id}")
+                except Exception as e:
+                    self.logger.warning(f"获取会员音频URL时出错: {e}")
+
+            # 如果没有获取到会员URL，使用免费模式
             if not playback_url:
-                # 回退到API URL，传递配置以支持代理
-                playback_url = get_playback_url(song_id, use_api=True, config=self.config)
+                # 尝试从link字段获取实际播放URL
+                playback_url = song_details.get('link')
+                if not playback_url:
+                    # 回退到API URL，传递配置以支持代理
+                    playback_url = get_playback_url(song_id, use_api=True, config=self.config)
 
             # 获取封面URL
             cover_url = song_details.get('cover')
@@ -452,3 +749,27 @@ class NetEaseProvider(BaseAudioProvider):
         except Exception as e:
             self.logger.error(f"从API URL提取歌曲ID时出错: {e}")
             return None
+
+    async def is_member_required(self, url: str) -> bool:
+        """
+        检查歌曲是否需要会员权限
+
+        Args:
+            url: 歌曲URL
+
+        Returns:
+            如果需要会员权限则返回True
+        """
+        if not self.member_auth.is_enabled():
+            return False
+
+        try:
+            song_id = self._extract_song_id(url)
+            if not song_id:
+                return False
+
+            # 检查歌曲是否对会员可用
+            return await self.member_auth.is_song_available_for_member(song_id)
+        except Exception as e:
+            self.logger.warning(f"检查会员权限时出错: {e}")
+            return False

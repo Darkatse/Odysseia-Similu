@@ -154,6 +154,119 @@ netease_proxy:
     # 是否记录代理请求的详细信息
     log_proxy_requests: false  # 可能包含敏感信息，生产环境建议关闭
 
+# 网易云音乐会员认证配置
+netease_member:
+  # 是否启用会员认证功能
+  # 启用后可以下载VIP专属歌曲和高品质音频
+  enabled: false  # 默认禁用，需要时手动启用
+
+  # 会员账号Cookie配置
+  # 从浏览器登录网易云音乐后获取的Cookie信息
+  cookies:
+    # 主要认证Cookie - MUSIC_U
+    # 这是最重要的认证Cookie，包含用户登录状态
+    # 获取方法：
+    # 1. 在浏览器中登录 music.163.com
+    # 2. 打开开发者工具 -> Application -> Cookies -> music.163.com
+    # 3. 复制 MUSIC_U 的值
+    MUSIC_U: ""  # 必填，会员认证的核心Cookie
+
+    # 可选的其他Cookie（通常自动获取，无需手动配置）
+    __csrf: ""      # CSRF令牌，通常自动从MUSIC_U中提取
+    __remember_me: "true"  # 记住登录状态
+
+    # 其他可能需要的Cookie（高级用户配置）
+    # 一般情况下只需要配置MUSIC_U即可
+    additional_cookies: {}
+      # 示例：
+      # "NMTID": "xxx"
+      # "WEVNSM": "xxx"
+
+  # 音频质量配置
+  audio_quality:
+    # 默认音频质量等级
+    # standard: 标准品质 (128kbps)
+    # higher: 较高品质 (192kbps)
+    # exhigh: 极高品质 (320kbps)
+    # lossless: 无损品质 (FLAC)
+    # hires: 高解析度音频 (Hi-Res)
+    default_level: "exhigh"  # 推荐设置为exhigh获得较好的音质
+
+    # 音频编码格式偏好
+    # mp3: MP3格式，兼容性最好
+    # aac: AAC格式，压缩效率更高
+    # flac: FLAC格式，无损音质
+    preferred_format: "aac"
+
+    # 是否自动降级音质
+    # 当请求的音质不可用时，是否自动使用较低音质
+    auto_fallback: true
+
+  # 认证和安全配置
+  authentication:
+    # Cookie有效性检查间隔（秒）
+    # 定期检查Cookie是否仍然有效，避免使用过期Cookie
+    validity_check_interval: 3600  # 1小时检查一次
+
+    # 是否在Cookie失效时自动禁用会员功能
+    # true: 自动回退到免费模式
+    # false: 继续尝试使用会员功能（可能导致错误）
+    auto_disable_on_invalid: true
+
+    # 最大重试次数
+    # 当会员API调用失败时的重试次数
+    max_retry_attempts: 3
+
+    # 重试间隔（秒）
+    retry_interval: 2
+
+  # 缓存配置
+  cache:
+    # 是否启用会员信息缓存
+    # 缓存用户VIP状态、音质权限等信息，减少API调用
+    enabled: true
+
+    # 缓存过期时间（秒）
+    # 会员信息缓存的有效期
+    expiry_time: 1800  # 30分钟
+
+    # 是否缓存音频URL
+    # 缓存获取到的音频下载链接，避免重复请求
+    cache_audio_urls: true
+
+    # 音频URL缓存过期时间（秒）
+    audio_url_expiry: 300  # 5分钟（网易云音乐的URL通常较短时效）
+
+  # 调试和日志配置
+  debug:
+    # 是否记录会员认证相关日志
+    log_authentication: true
+
+    # 是否记录音频质量选择过程
+    log_quality_selection: true
+
+    # 是否记录Cookie使用情况（注意：可能包含敏感信息）
+    log_cookie_usage: false  # 生产环境建议关闭
+
+    # 是否在日志中隐藏敏感信息
+    mask_sensitive_data: true  # 强烈建议保持开启
+
+  # 兼容性配置
+  compatibility:
+    # 是否与免费用户功能兼容
+    # 当会员功能不可用时，是否回退到免费用户模式
+    fallback_to_free: true
+
+    # 是否保持现有命令语法
+    # 确保启用会员功能后，Discord命令语法保持不变
+    preserve_command_syntax: true
+
+    # 错误处理策略
+    # silent: 静默处理错误，回退到免费模式
+    # notify: 通知用户会员功能不可用
+    # strict: 严格模式，会员功能失败时报错
+    error_handling: "notify"
+
 # 日志配置
 logging:
   level: "INFO"  # 日志级别选项：DEBUG、INFO、WARNING、ERROR、CRITICAL
