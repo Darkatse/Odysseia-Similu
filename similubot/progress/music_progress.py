@@ -504,6 +504,7 @@ class MusicProgressUpdater:
             context = self.lyrics_manager.parser.get_lyric_context(lyrics, current_position, context_lines=1)
             current_line = context.get('current')
             next_lines = context.get('next', [])
+            previous_lines = context.get('previous', [])
 
             # Build display parts
             display_parts = []
@@ -524,6 +525,13 @@ class MusicProgressUpdater:
 
             # Display all current lyrics as bold
             if current_lyrics:
+                # Show previous line if no interval lyrics
+                if len(current_lyrics) == 1 and previous_lines:
+                    previous_line = previous_lines[-1]
+                    previous_text = self.lyrics_manager.format_lyric_display(previous_line, show_translation=True)
+                    if previous_text:
+                        display_parts.append(f"*{previous_text}*")
+                # Show current lyrics
                 for lyric in current_lyrics:
                     lyric_text = self.lyrics_manager.format_lyric_display(lyric, show_translation=True)
                     if lyric_text:
@@ -559,6 +567,35 @@ class MusicProgressUpdater:
             self.logger.error(f"Error formatting lyric display: {e}", exc_info=True)
             return "*歌词显示错误*"
 
+    def interval_to_next_line(self, guild_id: int, lyrics: Optional[List[LyricLine]]) -> float:
+        """
+        Calculate the interval to the next lyric line.
+
+        Args:
+            guild_id: Discord guild ID
+            lyrics: List of parsed lyric lines
+        """
+        if not lyrics:
+            return self.update_interval
+        
+        # Get the current position
+        current_position = self.music_player.get_current_playback_position(guild_id)
+        if current_position is None:
+            return self.update_interval
+
+        # Get the next line
+        next_line = self.lyrics_manager.parser.get_upcoming_lyric(lyrics, current_position)
+        if next_line is None:
+            return self.update_interval
+        
+        # Calculate the interval
+        # add 0.1s to avoid updating too fast
+        # if too long, return default interval
+        interval = next_line.timestamp - current_position + 0.1
+        if interval > self.update_interval:
+            return self.update_interval
+        return interval
+
     async def start_progress_updates(
         self,
         message: discord.Message,
@@ -573,9 +610,9 @@ class MusicProgressUpdater:
             message: Discord message to update
             guild_id: Discord guild ID
             song: Current song object
-            update_interval: Update interval in seconds (uses default if None)
+            update_interval: Update interval in seconds (update with real-time lyrics if None)
         """
-        interval = update_interval or self.update_interval
+        interval = update_interval
 
         try:
             self.logger.info(f"Starting progress updates with lyrics for guild {guild_id}")
@@ -591,10 +628,10 @@ class MusicProgressUpdater:
             except Exception as e:
                 self.logger.warning(f"Failed to load lyrics for '{song.title}': {e}")
 
+            # For statistics only
             update_count = 0
-            max_updates = 120  # Maximum 10 minutes of updates (120 * 5 seconds)
 
-            while update_count < max_updates:
+            while True:
                 # Check if song is still playing
                 current_song = self.music_player.get_queue_manager(guild_id).get_current_song()
                 if not current_song or current_song.url != song.url:
@@ -619,6 +656,7 @@ class MusicProgressUpdater:
                 except discord.NotFound:
                     self.logger.debug(f"Message deleted, ending progress updates for guild {guild_id}")
                     break
+
                 except discord.HTTPException as e:
                     if e.status == 429:  # Rate limited
                         self.logger.warning(f"Rate limited, slowing down updates for guild {guild_id}")
@@ -627,8 +665,29 @@ class MusicProgressUpdater:
                         self.logger.error(f"HTTP error updating progress: {e}")
                         break
 
+                # Update channel status
+                channel = message.channel
+                current_position = self.music_player.get_current_playback_position(guild_id)
+                if current_position is not None:
+                    current_time = self.format_time(current_position)
+                    song_length = self.format_time(song.duration)
+                    try:
+                        await channel.edit(status=f"🎵 [{current_time}/{song_length}] {song.title}")
+                    except discord.HTTPException as e:
+                        if e.status == 429:  # Rate limited
+                            self.logger.warning(f"Rate limited, slowing down updates for guild {guild_id}")
+                            await asyncio.sleep(10)  # Wait longer if rate limited
+                        else:
+                            self.logger.error(f"HTTP error updating channel status: {e}")
+                    except Exception as e:
+                        self.logger.error(f"Error updating channel status: {e}")
+
                 # Wait for next update
-                await asyncio.sleep(interval)
+                if interval is None:
+                    interval_to_next_line = self.interval_to_next_line(guild_id, lyrics)
+                    await asyncio.sleep(interval_to_next_line)
+                else:
+                    await asyncio.sleep(interval)
                 update_count += 1
 
             self.logger.info(f"Progress updates ended for guild {guild_id} after {update_count} updates")
