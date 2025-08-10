@@ -137,11 +137,7 @@ class PlaybackEvent:
 
             # 设置频道状态
             try:
-                route = discord.http.Route("PUT", "/channels/{channel_id}/voice-status", channel_id=channel_id)
-                payload = {
-                    "status": f"🎵 {song.title}"
-                }
-                ret = await channel._state.http.request(route, json=payload)
+                await channel.edit(status=f"🎵 {song.title}")
                 self.logger.info(f"✅ 频道状态设置成功 - {song.title}")
             except Exception as e:
                 self.logger.warning(f"⚠️ 设置频道状态失败: {e}")
