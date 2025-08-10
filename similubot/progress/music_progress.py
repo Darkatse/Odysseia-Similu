@@ -529,12 +529,21 @@ class MusicProgressUpdater:
                 if len(current_lyrics) == 1 and previous_lines:
                     previous_line = previous_lines[-1]
                     previous_text = self.lyrics_manager.format_lyric_display(previous_line, show_translation=True)
-                    if previous_text:
+                    if "\n" in previous_text:
+                        split_text = previous_text.split("\n")
+                        previous_text = f"*{split_text[0]}*\n{split_text[1]}"
+                        display_parts.append(previous_text)
+                    else:
                         display_parts.append(f"*{previous_text}*")
+
                 # Show current lyrics
                 for lyric in current_lyrics:
                     lyric_text = self.lyrics_manager.format_lyric_display(lyric, show_translation=True)
-                    if lyric_text:
+                    if "\n" in lyric_text:
+                        split_text = lyric_text.split("\n")
+                        lyric_text = f"**{split_text[0]}**\n*{split_text[1]}*"
+                        display_parts.append(lyric_text)
+                    else:
                         display_parts.append(f"**{lyric_text}**")
             elif next_lines:
                 # Show upcoming lyric if no current lyrics
