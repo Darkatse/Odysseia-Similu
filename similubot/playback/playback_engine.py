@@ -119,6 +119,7 @@ class PlaybackEngine(IPlaybackEngine):
         "song_requester_absent_skip": [], # 跳过点歌人不在语音频道的歌曲
         "show_song_info": [], # 歌曲信息
         "your_song_notification": [], # 要轮到你的歌了！
+        "song_added_notification": [], # 歌曲添加到队列的公共通知
     }
     
     def add_event_handler(self, event_type: str, handler: callable) -> None:
@@ -153,7 +154,38 @@ class PlaybackEngine(IPlaybackEngine):
                 except Exception as e:
                     self.logger.error(f"事件处理器 {handler.__name__} 处理 {event_type} 时出错: {e}")
         else:
-            self.logger.warning(f"未知事件类型: {event_type}")     
+            self.logger.warning(f"未知事件类型: {event_type}")
+
+    async def _trigger_song_added_notification(self, guild_id: int, audio_info, position: int, source_type: str = "点歌", requester=None) -> None:
+        """
+        触发歌曲添加通知事件
+
+        Args:
+            guild_id: 服务器ID
+            audio_info: 音频信息
+            position: 队列位置
+            source_type: 添加来源类型 ("点歌" 或 "抽卡")
+            requester: 请求用户 (discord.Member)
+        """
+        try:
+            channel_id = self.get_text_channel_id(guild_id)
+            if not channel_id:
+                self.logger.debug(f"服务器 {guild_id} 未设置文本频道，跳过歌曲添加通知")
+                return
+
+            # 触发歌曲添加通知事件
+            await self._trigger_event(
+                "song_added_notification",
+                guild_id=guild_id,
+                channel_id=channel_id,
+                song=audio_info,
+                position=position,
+                source_type=source_type,
+                requester=requester
+            )
+
+        except Exception as e:
+            self.logger.error(f"触发歌曲添加通知事件失败: {e}", exc_info=True)
 
     async def add_song_to_queue(
         self, 
@@ -200,6 +232,9 @@ class PlaybackEngine(IPlaybackEngine):
                     raise  # 重新抛出其他异常
 
             self.logger.info(f"歌曲添加到队列 - 服务器 {guild_id}: {audio_info.title} (位置 {position})")
+
+            # 触发歌曲添加通知事件
+            await self._trigger_song_added_notification(guild_id, audio_info, position, "点歌", requester)
 
             # 如果没有正在播放，开始播放
             if not self.is_playing(guild_id):

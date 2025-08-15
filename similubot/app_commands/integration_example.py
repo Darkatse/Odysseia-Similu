@@ -56,6 +56,9 @@ class AppCommandsIntegration:
             # 注册通用命令
             self.command_registry.register_general_commands()
 
+            # 注册随机抽卡命令
+            self.command_registry.register_card_draw_commands()
+
             # 设置事件处理器
             self._setup_event_handlers()
 

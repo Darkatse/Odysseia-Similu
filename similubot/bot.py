@@ -152,7 +152,8 @@ class SimiluBot:
             event_mappings = {
                 "show_song_info": self.playback_event.show_song_info,
                 "song_requester_absent_skip": self.playback_event.song_requester_absent_skip,
-                "your_song_notification": self.playback_event.your_song_notification
+                "your_song_notification": self.playback_event.your_song_notification,
+                "song_added_notification": self.playback_event.song_added_notification
             }
 
             for event_type, handler in event_mappings.items():
@@ -207,8 +208,39 @@ class SimiluBot:
                 await self.music_player.initialize_persistence()
                 self.logger.info("✅ 队列持久化系统初始化完成")
 
+            # 初始化歌曲历史数据库（抽卡功能）
+            await self._init_song_history_database()
+            self.logger.info("✅ 歌曲历史数据库初始化完成")
+
         except Exception as e:
             self.logger.error(f"机器人就绪初始化失败: {e}", exc_info=True)
+
+    async def _init_song_history_database(self) -> None:
+        """初始化歌曲历史数据库"""
+        try:
+            from similubot.app_commands.card_draw.database import SongHistoryDatabase
+
+            # 检查是否启用抽卡功能
+            card_draw_config = self.config.get('card_draw', {})
+            if not card_draw_config.get('enabled', True):
+                self.logger.info("抽卡功能已禁用，跳过歌曲历史数据库初始化")
+                return
+
+            # 初始化数据库
+            self.song_history_db = SongHistoryDatabase()
+            success = await self.song_history_db.initialize()
+
+            if success:
+                self.logger.debug("歌曲历史数据库表结构创建成功")
+
+                # 将数据库实例存储到容器中供其他组件使用
+                if hasattr(self, 'container'):
+                    self.container.register_singleton("song_history_database", lambda: self.song_history_db)
+            else:
+                self.logger.error("歌曲历史数据库初始化失败")
+
+        except Exception as e:
+            self.logger.error(f"初始化歌曲历史数据库时发生异常: {e}", exc_info=True)
 
     async def start(self, token: str) -> None:
         """

@@ -267,6 +267,31 @@ netease_member:
     # strict: 严格模式，会员功能失败时报错
     error_handling: "notify"
 
+# 随机抽卡功能配置
+card_draw:
+  enabled: true  # 是否启用随机抽卡功能
+
+  # 抽卡行为配置
+  max_redraws: 3  # 每次抽卡的最大重抽次数
+  timeout_seconds: 60  # 用户交互超时时间（秒）
+
+  # 默认抽卡来源设置
+  default_source: "global"  # 默认抽卡来源：
+                            # - "global": 全局池（所有用户的歌曲历史）
+                            # - "personal": 个人池（用户自己的歌曲历史）
+
+  # 权重算法配置
+  weight_algorithm:
+    recent_bonus: 1.2  # 最近歌曲的权重加成倍数
+    frequency_penalty: 0.8  # 高频歌曲的权重惩罚倍数
+    user_diversity_bonus: 1.1  # 用户多样性加成倍数
+
+  # 数据库配置
+  database:
+    auto_record: true  # 是否自动记录队列歌曲到历史数据库
+    cleanup_days: 365  # 历史记录保留天数（0表示永久保留）
+    max_records_per_user: 1000  # 每个用户最大历史记录数（0表示无限制）
+
 # 日志配置
 logging:
   level: "INFO"  # 日志级别选项：DEBUG、INFO、WARNING、ERROR、CRITICAL

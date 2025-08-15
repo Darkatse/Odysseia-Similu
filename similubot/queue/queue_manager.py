@@ -191,6 +191,79 @@ class QueueManager(IQueueManager):
                 )
             except Exception as e:
                 self.logger.error(f"保存队列状态失败: {e}")
+
+    async def _record_song_to_history(self, audio_info: AudioInfo, requester: discord.Member) -> None:
+        """
+        记录歌曲到历史数据库（用于抽卡功能）
+
+        Args:
+            audio_info: 音频信息
+            requester: 请求用户
+        """
+        try:
+            # 检查是否启用抽卡功能
+            if self._config_manager:
+                card_draw_config = self._config_manager.get('card_draw', {})
+                if not card_draw_config.get('enabled', True):
+                    return
+
+                # 检查是否启用自动记录
+                if not card_draw_config.get('database', {}).get('auto_record', True):
+                    return
+
+            # 动态导入以避免循环依赖
+            try:
+                from similubot.app_commands.card_draw.database import SongHistoryDatabase
+
+                # 创建数据库实例（应该从容器中获取，但这里简化处理）
+                database = SongHistoryDatabase()
+
+                # 检测音频源类型
+                source_platform = self._detect_source_platform(audio_info.url)
+
+                # 记录到数据库
+                success = await database.add_song_record(
+                    audio_info=audio_info,
+                    requester=requester,
+                    guild_id=self.guild_id,
+                    source_platform=source_platform
+                )
+
+                if success:
+                    self.logger.debug(f"歌曲已记录到历史数据库: {audio_info.title}")
+                else:
+                    self.logger.warning(f"记录歌曲到历史数据库失败: {audio_info.title}")
+
+            except ImportError:
+                # 如果抽卡模块不可用，静默跳过
+                self.logger.debug("抽卡模块不可用，跳过歌曲历史记录")
+
+        except Exception as e:
+            # 记录失败不应该影响正常的队列操作
+            self.logger.error(f"记录歌曲历史时发生异常: {e}", exc_info=True)
+
+    def _detect_source_platform(self, url: str) -> str:
+        """
+        检测音频来源平台
+
+        Args:
+            url: 音频URL
+
+        Returns:
+            平台名称
+        """
+        url_lower = url.lower()
+
+        if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
+            return 'YouTube'
+        elif 'music.163.com' in url_lower or 'music.126.net' in url_lower:
+            return 'NetEase'
+        elif 'bilibili.com' in url_lower:
+            return 'Bilibili'
+        elif 'catbox.moe' in url_lower:
+            return 'Catbox'
+        else:
+            return 'Unknown'
     
     async def add_song(self, audio_info: AudioInfo, requester: discord.Member) -> int:
         """
@@ -251,6 +324,9 @@ class QueueManager(IQueueManager):
             self._duplicate_detector.add_song_for_user(audio_info, requester)
 
             self.logger.info(f"添加歌曲到队列: {song.title} (位置 {position})")
+
+            # 记录到歌曲历史数据库（用于抽卡功能）
+            await self._record_song_to_history(audio_info, requester)
 
             # 保存状态
             await self._save_state()

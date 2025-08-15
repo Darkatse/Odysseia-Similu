@@ -128,7 +128,7 @@ class MusicSearchCommands(BaseSlashCommand):
                 description=f"正在处理 {source_name} 链接...",
                 color=discord.Color.blue()
             )
-            await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
             # 创建进度更新器
             progress_updater = DiscordProgressUpdater(interaction)

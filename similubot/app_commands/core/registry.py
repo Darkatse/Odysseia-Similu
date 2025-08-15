@@ -72,6 +72,21 @@ class CommandRegistry:
             self.logger.error(f"注册通用命令失败: {e}", exc_info=True)
             raise
 
+    def register_card_draw_commands(self) -> None:
+        """注册随机抽卡相关命令"""
+        try:
+            # 注册随机抽卡命令
+            self._register_card_draw_command()
+
+            # 注册抽卡来源设置命令
+            self._register_card_draw_source_command()
+
+            self.logger.info("随机抽卡命令已注册")
+
+        except Exception as e:
+            self.logger.error(f"注册随机抽卡命令失败: {e}", exc_info=True)
+            raise
+
     def _register_song_request_command(self) -> None:
         """注册点歌命令"""
         @self.bot.tree.command(name="点歌", description="搜索并添加歌曲到播放队列")
@@ -221,6 +236,69 @@ class CommandRegistry:
             except Exception as e:
                 self.logger.error(f"帮助命令执行失败: {e}", exc_info=True)
                 await self._send_error_response(interaction, "帮助信息加载失败")
+
+    def _register_card_draw_command(self) -> None:
+        """注册随机抽卡命令"""
+        @self.bot.tree.command(name="随机抽卡", description="从歌曲历史中随机抽取一首歌曲")
+        async def random_card_draw(interaction: discord.Interaction):
+            """随机抽卡命令处理器"""
+            try:
+                from ..card_draw.card_draw_commands import CardDrawCommands
+                from ..card_draw.database import SongHistoryDatabase
+                from ..card_draw.random_selector import RandomSongSelector
+                from similubot.utils.config_manager import ConfigManager
+
+                config = self.container.resolve(ConfigManager)
+                music_player = list(self.service_provider.container._singletons.values())[1]
+
+                # 初始化抽卡组件
+                database = SongHistoryDatabase()
+                selector = RandomSongSelector(database)
+                handler = CardDrawCommands(config, music_player, database, selector)
+
+                await handler.execute(interaction)
+
+            except Exception as e:
+                self.logger.error(f"随机抽卡命令执行失败: {e}", exc_info=True)
+                await self._send_error_response(interaction, "随机抽卡执行失败")
+
+    def _register_card_draw_source_command(self) -> None:
+        """注册抽卡来源设置命令"""
+        @self.bot.tree.command(name="设置抽卡来源", description="设置随机抽卡的歌曲来源")
+        @app_commands.describe(
+            来源="抽卡来源类型",
+            目标用户="当选择指定用户池时的目标用户"
+        )
+        @app_commands.choices(来源=[
+            app_commands.Choice(name="全局池（所有用户）", value="global"),
+            app_commands.Choice(name="个人池（仅自己）", value="personal"),
+            app_commands.Choice(name="指定用户池", value="specific_user")
+        ])
+        async def set_card_draw_source(
+            interaction: discord.Interaction,
+            来源: app_commands.Choice[str],
+            目标用户: Optional[discord.Member] = None
+        ):
+            """抽卡来源设置命令处理器"""
+            try:
+                from ..card_draw.source_settings_commands import SourceSettingsCommands
+                from ..card_draw.database import SongHistoryDatabase
+                from ..card_draw.random_selector import RandomSongSelector
+                from similubot.utils.config_manager import ConfigManager
+
+                config = self.container.resolve(ConfigManager)
+                music_player = list(self.service_provider.container._singletons.values())[1]
+
+                # 初始化设置组件
+                database = SongHistoryDatabase()
+                selector = RandomSongSelector(database)
+                handler = SourceSettingsCommands(config, music_player, database, selector)
+
+                await handler.execute(interaction, source=来源.value, target_user=目标用户)
+
+            except Exception as e:
+                self.logger.error(f"设置抽卡来源命令执行失败: {e}", exc_info=True)
+                await self._send_error_response(interaction, "设置抽卡来源失败")
 
     async def sync_commands(self, guild: Optional[discord.Guild] = None) -> None:
         """

@@ -67,6 +67,16 @@ class HelpCommand(BaseSlashCommand):
                 inline=False
             )
 
+            # 随机抽卡功能
+            embed.add_field(
+                name="🎲 随机抽卡命令",
+                value=(
+                    "`/随机抽卡` - 从歌曲历史中随机抽取一首歌曲\n"
+                    "`/设置抽卡来源` - 设置抽卡的歌曲来源池"
+                ),
+                inline=False
+            )
+
             # 通用命令
             embed.add_field(
                 name="📋 通用命令",

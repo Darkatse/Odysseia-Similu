@@ -3,6 +3,7 @@ from aiohttp import payload
 import discord
 import discord.http
 from typing import Optional
+from datetime import datetime
 from similubot.core.interfaces import SongInfo
 from similubot.progress.music_progress import MusicProgressBar
 
@@ -231,6 +232,8 @@ class PlaybackEvent:
                 interval_str = "下一首"
             elif interval == 2:
                 interval_str = "下下首"
+            else:
+                interval_str = f"第{interval}首"
 
             embed = discord.Embed(
                 title="📣 轮到你的歌了",
@@ -266,3 +269,98 @@ class PlaybackEvent:
 
         except Exception as e:
             self.logger.error(f"❌ 发送轮到你的歌通知时出错: {e}", exc_info=True)
+
+    async def song_added_notification(self, bot, guild_id, channel_id, song, position, source_type="点歌", requester=None) -> None:
+        """
+        发送歌曲添加到队列的公共通知
+
+        当歌曲成功添加到队列时发送公共通知，让所有用户知道新歌曲的添加情况。
+
+        Args:
+            bot: Discord机器人实例
+            guild_id: 服务器ID
+            channel_id: 文本频道ID
+            song: 添加的歌曲信息 (AudioInfo 或 SongInfo)
+            position: 队列中的位置
+            source_type: 添加来源类型 ("点歌" 或 "抽卡")
+            requester: 请求用户 (discord.Member)，如果song对象没有requester属性时使用
+        """
+        try:
+            self.logger.debug(f"🎵 发送歌曲添加通知 - 服务器 {guild_id}, 歌曲: {song.title}, 来源: {source_type}")
+
+            # 根据来源类型设置不同的标题和图标
+            if source_type == "抽卡":
+                title = "🎲 抽卡歌曲已添加到队列"
+                color = discord.Color.purple()
+            else:
+                title = "🎵 歌曲已添加到队列"
+                color = discord.Color.green()
+
+            embed = discord.Embed(
+                title=title,
+                color=color
+            )
+
+            # 歌曲基本信息
+            song_info = f"**{song.title}**"
+            if hasattr(song, 'uploader'):
+                song_info += f"\n艺术家: {song.uploader}"
+            elif hasattr(song, 'artist'):
+                song_info += f"\n艺术家: {song.artist}"
+
+            embed.add_field(
+                name="歌曲信息",
+                value=song_info,
+                inline=False
+            )
+
+            # 队列位置信息
+            embed.add_field(
+                name="队列位置",
+                value=f"第 {position} 位",
+                inline=True
+            )
+
+            # 时长信息
+            duration = getattr(song, 'duration', 0)
+            if duration:
+                embed.add_field(
+                    name="时长",
+                    value=self._format_duration(duration),
+                    inline=True
+                )
+
+            # 点歌人信息
+            if hasattr(song, 'requester') and song.requester:
+                # SongInfo对象包含requester信息
+                requester_mention = song.requester.mention
+            elif requester:
+                # 使用传入的requester参数
+                requester_mention = requester.mention
+            else:
+                # 最后的回退选项
+                requester_mention = "未知用户"
+
+            embed.add_field(
+                name="点歌人",
+                value=requester_mention,
+                inline=True
+            )
+
+            # 设置缩略图
+            thumbnail_url = getattr(song, 'thumbnail_url', None)
+            if thumbnail_url:
+                embed.set_thumbnail(url=thumbnail_url)
+
+            # 添加时间戳
+            embed.timestamp = datetime.now()
+
+            channel = bot.get_channel(channel_id)
+            if channel:
+                await channel.send(embed=embed)
+                self.logger.info(f"✅ 歌曲添加通知发送成功 - {song.title} (来源: {source_type})")
+            else:
+                self.logger.warning(f"❌ 频道 {channel_id} 不存在，无法发送歌曲添加通知")
+
+        except Exception as e:
+            self.logger.error(f"❌ 发送歌曲添加通知时出错: {e}", exc_info=True)
