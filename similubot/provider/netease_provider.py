@@ -633,6 +633,29 @@ class NetEaseProvider(BaseAudioProvider):
         Returns:
             下载是否成功
         """
+        return await self._download_file_with_retry(url, file_path, progress_tracker, retry_count=0)
+
+    async def _download_file_with_retry(
+        self,
+        url: str,
+        file_path: str,
+        progress_tracker: Optional[any] = None,
+        retry_count: int = 0
+    ) -> bool:
+        """
+        下载文件到指定路径，支持URL过期重试
+
+        Args:
+            url: 下载URL（可能是API代理URL）
+            file_path: 保存路径
+            progress_tracker: 进度跟踪器
+            retry_count: 当前重试次数
+
+        Returns:
+            下载是否成功
+        """
+        max_retries = 1  # 最多重试1次（总共尝试2次）
+
         try:
             # 确保目录存在
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -653,6 +676,29 @@ class NetEaseProvider(BaseAudioProvider):
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
                 # 处理可能的重定向
                 async with session.get(download_url, headers=proxy_headers, allow_redirects=True) as response:
+                    if response.status == 403:
+                        # 检查是否是URL过期错误
+                        auth_msg = response.headers.get('X-AUTH-MSG', '').lower()
+                        if 'expired url' in auth_msg or 'auth failed' in auth_msg:
+                            self.logger.warning(f"检测到URL过期错误: {auth_msg}")
+
+                            # 如果还有重试机会，尝试刷新URL
+                            if retry_count < max_retries:
+                                fresh_url = await self._refresh_expired_url(url)
+                                if fresh_url and fresh_url != url:
+                                    self.logger.info(f"URL刷新成功，重试下载 (第{retry_count + 1}次)")
+                                    return await self._download_file_with_retry(
+                                        fresh_url, file_path, progress_tracker, retry_count + 1
+                                    )
+                                else:
+                                    self.logger.warning("URL刷新失败，无法获取新的下载链接")
+                            else:
+                                self.logger.error(f"已达到最大重试次数({max_retries})，放弃下载")
+
+                        self.logger.error(f"NetEase音频下载请求失败，状态码: {response.status}")
+                        self.logger.debug(f"响应头: {dict(response.headers)}")
+                        return False
+
                     if response.status != 200:
                         self.logger.error(f"NetEase音频下载请求失败，状态码: {response.status}")
                         self.logger.debug(f"响应头: {dict(response.headers)}")
@@ -678,7 +724,7 @@ class NetEaseProvider(BaseAudioProvider):
                                 from similubot.utils.netease_search import get_playback_url
                                 direct_url = get_playback_url(song_id, use_api=False, config=self.config)
                                 self.logger.debug(f"尝试直接URL: {direct_url}")
-                                return await self._download_file(direct_url, file_path, progress_tracker)
+                                return await self._download_file_with_retry(direct_url, file_path, progress_tracker, retry_count)
 
                         return False
 
@@ -727,6 +773,76 @@ class NetEaseProvider(BaseAudioProvider):
                 except:
                     pass
             return False
+
+    async def _refresh_expired_url(self, expired_url: str) -> Optional[str]:
+        """
+        刷新过期的下载URL
+
+        当检测到URL过期时，使用歌曲ID重新生成新的下载链接
+
+        Args:
+            expired_url: 过期的下载URL
+
+        Returns:
+            新的下载URL，如果刷新失败则返回None
+        """
+        try:
+            self.logger.debug(f"开始刷新过期URL: {expired_url[:100]}...")
+
+            # 1. 尝试从缓存中获取歌曲ID
+            song_id = self._get_cached_song_id(expired_url)
+
+            # 2. 如果缓存中没有，尝试从URL中提取
+            if not song_id:
+                song_id = self._extract_song_id_from_api_url(expired_url)
+
+            if not song_id:
+                self.logger.warning(f"无法从过期URL中提取歌曲ID: {expired_url}")
+                return None
+
+            self.logger.debug(f"从过期URL提取到歌曲ID: {song_id}")
+
+            # 4. 尝试使用会员认证获取新的URL（如果启用）
+            if self.member_auth.is_enabled():
+                try:
+                    fresh_member_url = await self.member_auth.get_member_audio_url(song_id)
+                    if fresh_member_url:
+                        self.logger.debug(f"使用会员认证刷新URL成功: {song_id}")
+                        # 更新缓存映射
+                        self._cache_url_song_id_mapping(fresh_member_url, song_id)
+                        return fresh_member_url
+                    else:
+                        self.logger.debug(f"会员URL刷新失败，回退到免费模式: {song_id}")
+                except Exception as e:
+                    self.logger.warning(f"会员URL刷新时出错: {e}")
+
+            # 5. 回退到免费模式URL生成
+            from similubot.utils.netease_search import get_playback_url
+
+            # 尝试API模式
+            try:
+                fresh_api_url = get_playback_url(song_id, use_api=True, config=self.config)
+                if fresh_api_url and fresh_api_url != expired_url:
+                    self.logger.debug(f"使用API模式刷新URL成功: {song_id}")
+                    return fresh_api_url
+            except Exception as e:
+                self.logger.warning(f"API模式URL刷新时出错: {e}")
+
+            # 尝试直接模式
+            try:
+                fresh_direct_url = get_playback_url(song_id, use_api=False, config=self.config)
+                if fresh_direct_url and fresh_direct_url != expired_url:
+                    self.logger.debug(f"使用直接模式刷新URL成功: {song_id}")
+                    return fresh_direct_url
+            except Exception as e:
+                self.logger.warning(f"直接模式URL刷新时出错: {e}")
+
+            self.logger.warning(f"所有URL刷新方法都失败: {song_id}")
+            return None
+
+        except Exception as e:
+            self.logger.error(f"刷新过期URL时出错: {e}", exc_info=True)
+            return None
 
     def _extract_song_id_from_api_url(self, api_url: str) -> Optional[str]:
         """
