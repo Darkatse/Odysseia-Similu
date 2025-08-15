@@ -116,6 +116,11 @@ class PlaybackControlCommands(BaseSlashCommand):
                 self.logger.debug("使用直接跳过模式")
                 await self._direct_skip_song(interaction, current_song)
                 return
+            elif current_song.requester == interaction.user:
+                # 如果请求者是当前用户，直接跳过
+                self.logger.debug("使用直接跳过模式（请求者是当前用户）")
+                await self._direct_skip_song(interaction, current_song)
+                return
 
             # 启动民主投票
             self.logger.info(f"启动民主投票跳过 - 歌曲: {current_song.title}, 语音频道人数: {len(voice_members)}")
