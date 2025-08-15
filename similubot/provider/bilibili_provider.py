@@ -169,13 +169,15 @@ class BilibiliProvider(BaseAudioProvider):
                     if response.status in (301, 302, 303, 307, 308):
                         redirect_url = response.headers.get('Location')
                         if redirect_url:
-                            self.logger.debug(f"短链接重定向到: {redirect_url}")
+                            # 提取清洁的URL用于日志记录（移除跟踪参数）
+                            clean_url = self._get_clean_url_for_logging(redirect_url)
+                            self.logger.debug(f"短链接重定向到: {clean_url}")
 
                             # 验证重定向的URL是否为有效的 Bilibili URL
                             if self._is_valid_bilibili_redirect(redirect_url):
                                 return redirect_url
                             else:
-                                self.logger.warning(f"重定向URL不是有效的Bilibili链接: {redirect_url}")
+                                self.logger.warning(f"重定向URL不是有效的Bilibili链接: {clean_url}")
                                 return None
                         else:
                             self.logger.warning(f"重定向响应缺少Location头: {response.status}")
@@ -193,6 +195,55 @@ class BilibiliProvider(BaseAudioProvider):
         except Exception as e:
             self.logger.error(f"解析短链接时发生未知错误: {e}")
             return None
+
+    def _get_clean_url_for_logging(self, url: str) -> str:
+        """
+        获取用于日志记录的清洁URL，移除跟踪参数和敏感信息
+
+        Args:
+            url: 原始URL
+
+        Returns:
+            清洁的URL，只包含域名和视频ID等基本信息
+        """
+        try:
+            parsed = urlparse(url)
+
+            # 构建基本URL（协议 + 域名 + 路径）
+            clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+
+            # 如果有查询参数，只保留重要的非跟踪参数
+            if parsed.query:
+                query_params = parse_qs(parsed.query)
+
+                # 定义允许记录的安全参数（不包含跟踪信息）
+                safe_params = ['p', 't']  # p=页面索引, t=时间戳（秒）
+
+                clean_params = {}
+                for param, values in query_params.items():
+                    if param in safe_params and values:
+                        # 只取第一个值，并确保是安全的
+                        value = values[0]
+                        if param == 'p' and value.isdigit():
+                            clean_params[param] = value
+                        elif param == 't' and value.isdigit():
+                            clean_params[param] = value
+
+                # 如果有安全参数，添加到URL中
+                if clean_params:
+                    clean_query = '&'.join(f"{k}={v}" for k, v in clean_params.items())
+                    clean_url += f"?{clean_query}"
+
+            return clean_url
+
+        except Exception as e:
+            # 如果解析失败，返回域名信息
+            self.logger.debug(f"解析URL用于日志记录时出错: {e}")
+            try:
+                parsed = urlparse(url)
+                return f"{parsed.scheme}://{parsed.netloc}/[视频链接]"
+            except:
+                return "[无法解析的URL]"
 
     def _is_valid_bilibili_redirect(self, url: str) -> bool:
         """

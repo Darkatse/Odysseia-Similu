@@ -279,6 +279,171 @@ class TestBilibiliProvider:
         for url in invalid_urls:
             assert not self.provider._is_valid_bilibili_redirect(url), f"不应该认为 {url} 是有效的Bilibili重定向URL"
 
+    def test_get_clean_url_for_logging_basic_url(self):
+        """测试基本URL的清洁处理"""
+        test_cases = [
+            # 基本URL，无参数
+            ("https://www.bilibili.com/video/BV1uv411q7Mv", "https://www.bilibili.com/video/BV1uv411q7Mv"),
+            ("https://bilibili.com/video/av123456", "https://bilibili.com/video/av123456"),
+        ]
+
+        for original_url, expected_clean in test_cases:
+            result = self.provider._get_clean_url_for_logging(original_url)
+            assert result == expected_clean, f"URL {original_url} 应该清洁为 {expected_clean}，实际得到 {result}"
+
+    def test_get_clean_url_for_logging_with_safe_params(self):
+        """测试包含安全参数的URL清洁处理"""
+        test_cases = [
+            # 只有安全参数
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?p=2", "https://www.bilibili.com/video/BV1uv411q7Mv?p=2"),
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?t=123", "https://www.bilibili.com/video/BV1uv411q7Mv?t=123"),
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?p=3&t=456", "https://www.bilibili.com/video/BV1uv411q7Mv?p=3&t=456"),
+        ]
+
+        for original_url, expected_clean in test_cases:
+            result = self.provider._get_clean_url_for_logging(original_url)
+            assert result == expected_clean, f"URL {original_url} 应该清洁为 {expected_clean}，实际得到 {result}"
+
+    def test_get_clean_url_for_logging_with_tracking_params(self):
+        """测试包含跟踪参数的URL清洁处理"""
+        test_cases = [
+            # 移除跟踪参数
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?spm_id_from=333.999", "https://www.bilibili.com/video/BV1uv411q7Mv"),
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?vd_source=abc123", "https://www.bilibili.com/video/BV1uv411q7Mv"),
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?from=search", "https://www.bilibili.com/video/BV1uv411q7Mv"),
+            # 混合参数：保留安全参数，移除跟踪参数
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?p=2&spm_id_from=333.999&vd_source=abc123", "https://www.bilibili.com/video/BV1uv411q7Mv?p=2"),
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?spm_id_from=333.999&p=3&t=456&vd_source=abc123", "https://www.bilibili.com/video/BV1uv411q7Mv?p=3&t=456"),
+        ]
+
+        for original_url, expected_clean in test_cases:
+            result = self.provider._get_clean_url_for_logging(original_url)
+            assert result == expected_clean, f"URL {original_url} 应该清洁为 {expected_clean}，实际得到 {result}"
+
+    def test_get_clean_url_for_logging_invalid_params(self):
+        """测试包含无效参数值的URL清洁处理"""
+        test_cases = [
+            # 无效的p参数值（非数字）
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?p=abc", "https://www.bilibili.com/video/BV1uv411q7Mv"),
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?t=xyz", "https://www.bilibili.com/video/BV1uv411q7Mv"),
+            # 混合有效和无效参数
+            ("https://www.bilibili.com/video/BV1uv411q7Mv?p=2&t=abc&spm_id_from=333", "https://www.bilibili.com/video/BV1uv411q7Mv?p=2"),
+        ]
+
+        for original_url, expected_clean in test_cases:
+            result = self.provider._get_clean_url_for_logging(original_url)
+            assert result == expected_clean, f"URL {original_url} 应该清洁为 {expected_clean}，实际得到 {result}"
+
+    def test_get_clean_url_for_logging_malformed_url(self):
+        """测试格式错误的URL处理"""
+        malformed_urls = [
+            "not-a-url",
+            "://missing-scheme",
+            "https://",
+        ]
+
+        for url in malformed_urls:
+            result = self.provider._get_clean_url_for_logging(url)
+            # 应该返回安全的占位符，不应该抛出异常
+            assert result in ["[无法解析的URL]", "[视频链接]"] or "bilibili.com" in result, f"格式错误的URL {url} 应该返回安全的占位符"
+
+    @pytest.mark.asyncio
+    async def test_resolve_short_link_privacy_logging(self):
+        """测试短链接解析时的隐私保护日志记录"""
+        short_url = "https://b23.tv/abc123"
+        # 模拟包含跟踪参数的重定向URL
+        redirect_with_tracking = "https://www.bilibili.com/video/BV1uv411q7Mv?p=2&spm_id_from=333.999&vd_source=sensitive123&from=share"
+        expected_clean_log = "https://www.bilibili.com/video/BV1uv411q7Mv?p=2"
+
+        # 模拟HTTP响应
+        mock_response = Mock()
+        mock_response.status = 302
+        mock_response.headers = {'Location': redirect_with_tracking}
+
+        mock_context_manager = AsyncMock()
+        mock_context_manager.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = Mock()
+        mock_session.head = Mock(return_value=mock_context_manager)
+
+        mock_session_context = AsyncMock()
+        mock_session_context.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_context.__aexit__ = AsyncMock(return_value=None)
+
+        # 捕获日志输出
+        with patch('aiohttp.ClientSession', return_value=mock_session_context), \
+             patch.object(self.provider.logger, 'debug') as mock_debug:
+
+            result = await self.provider._resolve_short_link(short_url)
+
+            # 验证返回的是完整URL（用于实际处理）
+            assert result == redirect_with_tracking
+
+            # 验证日志记录的是清洁URL（保护隐私）
+            mock_debug.assert_called()
+            debug_calls = [call.args[0] for call in mock_debug.call_args_list]
+
+            # 检查是否有包含清洁URL的日志调用
+            clean_log_found = any(expected_clean_log in call for call in debug_calls)
+            assert clean_log_found, f"应该记录清洁URL {expected_clean_log}，实际日志调用: {debug_calls}"
+
+            # 确保敏感信息没有被记录
+            sensitive_info = ["spm_id_from", "vd_source", "sensitive123"]
+            for call in debug_calls:
+                for sensitive in sensitive_info:
+                    assert sensitive not in call, f"日志中不应该包含敏感信息 {sensitive}，实际日志: {call}"
+
+    @pytest.mark.asyncio
+    async def test_resolve_short_link_invalid_redirect_privacy_logging(self):
+        """测试短链接重定向到无效URL时的隐私保护日志记录"""
+        short_url = "https://b23.tv/abc123"
+        # 模拟重定向到非Bilibili URL，但包含敏感参数
+        invalid_redirect = "https://example.com/malicious?user_id=12345&token=secret123&ref=bilibili"
+        expected_clean_log = "https://example.com/malicious"
+
+        # 模拟HTTP响应
+        mock_response = Mock()
+        mock_response.status = 302
+        mock_response.headers = {'Location': invalid_redirect}
+
+        mock_context_manager = AsyncMock()
+        mock_context_manager.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = Mock()
+        mock_session.head = Mock(return_value=mock_context_manager)
+
+        mock_session_context = AsyncMock()
+        mock_session_context.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_context.__aexit__ = AsyncMock(return_value=None)
+
+        # 捕获日志输出
+        with patch('aiohttp.ClientSession', return_value=mock_session_context), \
+             patch.object(self.provider.logger, 'debug') as mock_debug, \
+             patch.object(self.provider.logger, 'warning') as mock_warning:
+
+            result = await self.provider._resolve_short_link(short_url)
+
+            # 验证返回None（因为重定向URL无效）
+            assert result is None
+
+            # 验证警告日志记录的是清洁URL（保护隐私）
+            mock_warning.assert_called()
+            warning_calls = [call.args[0] for call in mock_warning.call_args_list]
+
+            # 检查是否有包含清洁URL的警告日志调用
+            clean_warning_found = any(expected_clean_log in call for call in warning_calls)
+            assert clean_warning_found, f"警告日志应该包含清洁URL {expected_clean_log}，实际警告日志: {warning_calls}"
+
+            # 确保敏感信息没有被记录在任何日志中
+            sensitive_info = ["user_id", "token", "secret123", "12345"]
+            all_log_calls = [call.args[0] for call in mock_debug.call_args_list] + warning_calls
+
+            for call in all_log_calls:
+                for sensitive in sensitive_info:
+                    assert sensitive not in call, f"日志中不应该包含敏感信息 {sensitive}，实际日志: {call}"
+
     @pytest.mark.asyncio
     async def test_extract_video_id_async_short_link_success(self):
         """测试异步提取视频ID - 短链接成功解析"""
