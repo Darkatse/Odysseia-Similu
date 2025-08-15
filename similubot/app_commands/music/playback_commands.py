@@ -80,9 +80,6 @@ class PlaybackControlCommands(BaseSlashCommand):
 
             self.logger.debug(f"处理跳过命令 - 用户: {interaction.user.display_name}")
 
-            # 停止任何活跃的进度条
-            self.progress_bar.stop_progress_updates(interaction.guild.id)
-
             # 获取当前歌曲信息
             queue_info = await self.music_player.get_queue_info(interaction.guild.id)
             current_song = queue_info.get("current_song")
@@ -266,6 +263,9 @@ class PlaybackControlCommands(BaseSlashCommand):
             current_song: 当前歌曲信息
         """
         try:
+            # 停止任何活跃的进度条
+            self.progress_bar.stop_progress_updates(interaction.guild.id)
+
             success, skipped_title, error = await self.music_player.skip_current_song(interaction.guild.id)
 
             if not success:
@@ -300,6 +300,9 @@ class PlaybackControlCommands(BaseSlashCommand):
         """
         try:
             success, skipped_title, error = await self.music_player.skip_current_song(guild_id)
+
+            # 停止任何活跃的进度条
+            self.progress_bar.stop_progress_updates(guild_id)
 
             if success:
                 self.logger.info(f"成功跳过歌曲: {skipped_title}")
