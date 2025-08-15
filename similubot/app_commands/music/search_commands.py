@@ -608,7 +608,7 @@ class MusicSearchCommands(BaseSlashCommand):
                         value=f"第 {position} 位",
                         inline=True
                     )
-                    await interaction.response.send_message(embed=embed)
+                    await interaction.followup.send(embed=embed) # 呃啊居然不能用respond而是followup吗
                 else:
                     await self.send_error_response(interaction, error_msg or "替换歌曲失败")
             else:
