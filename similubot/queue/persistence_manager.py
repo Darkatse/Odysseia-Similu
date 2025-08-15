@@ -91,12 +91,8 @@ class PersistenceManager(IPersistenceManager):
             return False
     
     def _validate_song_url(self, song: Song) -> bool:
-        """验证歌曲URL是否有效（简单检查）"""
-        try:
-            url = song.url.lower()
-            return ("youtube.com" in url or "youtu.be" in url or "catbox.moe" in url)
-        except:
-            return False
+        """验证歌曲URL是否有效"""
+        return song.url.startswith("http://") or song.url.startswith("https://")
     
     async def save_queue_state(
         self, 
