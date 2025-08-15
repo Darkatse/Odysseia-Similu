@@ -282,7 +282,7 @@ class InteractionManager:
             embed = self._create_confirmation_embed(search_result, ctx.author)
 
             # 发送消息
-            message = await ctx.send(embed=embed, view=view)
+            message = await ctx.send(embed=embed, view=view, ephemeral=True)
             
             # 等待用户交互
             await view.wait()
@@ -327,7 +327,7 @@ class InteractionManager:
             embed = self._create_selection_embed(search_results, ctx.author)
 
             # 发送消息
-            message = await ctx.send(embed=embed, view=view)
+            message = await ctx.send(embed=embed, view=view, ephemeral=True)
             
             # 等待用户交互
             await view.wait()
@@ -380,7 +380,7 @@ class InteractionManager:
             )
 
             # 发送消息
-            message = await ctx.send(embed=embed, view=view)
+            message = await ctx.send(embed=embed, view=view, ephemeral=True)
 
             # 等待用户交互
             await view.wait()

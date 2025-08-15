@@ -6,13 +6,11 @@ import discord
 from discord.ext import commands
 
 # 核心模块
-from similubot.core.command_registry import CommandRegistry
 from similubot.core.event_handler import EventHandler
 from similubot.core.dependency_container import DependencyContainer
 
-# 命令模块
-from similubot.commands.general_commands import GeneralCommands
-from similubot.commands.music_commands import MusicCommands
+# 新的 Slash Commands 架构
+from similubot.app_commands.integration_example import setup_app_commands
 
 # 新架构模块 - 使用重构后的播放引擎
 from similubot.playback.playback_engine import PlaybackEngine
@@ -34,7 +32,7 @@ class SimiluBot:
 
     def __init__(self, config: ConfigManager):
         """
-        Initialize the Discord bot with modern dependency injection.
+        Initialize the Discord bot with modern Slash Commands architecture.
 
         Args:
             config: Configuration manager
@@ -52,7 +50,7 @@ class SimiluBot:
         self.bot = commands.Bot(
             command_prefix=self.config.get('discord.command_prefix', '!'),
             intents=intents,
-            help_command=None  # We'll use our custom help command
+            help_command=None  # We'll use our custom slash commands
         )
 
         # 存储对自身的引用，供事件处理器使用
@@ -62,11 +60,7 @@ class SimiluBot:
         self._register_dependencies()
         self._init_core_modules()
 
-        # Initialize command modules
-        self._init_command_modules()
-
-        # Register commands and events
-        self._register_commands()
+        # Setup event handlers
         self._setup_event_handlers()
 
         # 设置机器人启动时的初始化任务
@@ -105,20 +99,11 @@ class SimiluBot:
             from similubot.playback.playback_event import PlaybackEvent
             return PlaybackEvent(music_player_adapter=music_player_adapter)
 
-        # 命令注册器工厂函数
-        def create_command_registry() -> CommandRegistry:
-            return CommandRegistry(
-                bot=self.bot,
-                auth_manager=None,
-                unauthorized_handler=None
-            )
-
         # 注册依赖项（按依赖顺序）
         self.container.register_singleton("temp_dir", create_temp_dir)
         self.container.register_singleton("playback_engine", create_playback_engine, ["temp_dir"])
         self.container.register_singleton("music_player_adapter", create_music_player_adapter, ["playback_engine"])
         self.container.register_singleton("playback_event", create_playback_event, ["music_player_adapter"])
-        self.container.register_singleton("command_registry", create_command_registry)
 
         # 验证依赖关系
         self.container.validate_dependencies()
@@ -136,11 +121,9 @@ class SimiluBot:
             self.logger.debug("🔧 开始解析核心依赖项...")
 
             # 按依赖顺序解析组件
-            temp_dir = self.container.resolve("temp_dir")
             self.playback_engine = self.container.resolve("playback_engine")
             self.music_player = self.container.resolve("music_player_adapter")
             self.playback_event = self.container.resolve("playback_event")
-            self.command_registry = self.container.resolve("command_registry")
 
             # 注册播放事件处理器到播放引擎
             self._register_playback_events_to_engine()
@@ -182,46 +165,28 @@ class SimiluBot:
             self.logger.error(f"❌ 播放事件处理器注册失败: {e}", exc_info=True)
             raise RuntimeError(f"播放事件处理器注册失败: {e}") from e
 
-    def _init_command_modules(self) -> None:
-        """初始化命令模块。"""
-        # 初始化通用命令
-        self.general_commands = GeneralCommands(
-            config=self.config,
-            image_generator=None  # 不再支持图像生成
-        )
+    async def _init_slash_commands(self) -> None:
+        """初始化 Slash Commands 系统"""
+        try:
+            self.logger.debug("🔧 开始初始化 Slash Commands...")
 
-        # 初始化音乐命令
-        self.music_commands = MusicCommands(
-            config=self.config,
-            music_player=self.music_player
-        )
+            # 使用新的 app_commands 架构设置 Slash Commands
+            self.app_commands_integration = await setup_app_commands(
+                bot=self.bot,
+                config=self.config,
+                music_player=self.music_player
+            )
 
-        self.logger.debug("命令模块初始化完成")
+            self.logger.info("✅ Slash Commands 初始化完成")
 
-    def _register_commands(self) -> None:
-        """注册所有命令到命令注册器。"""
-        # 注册通用命令
-        self.general_commands.register_commands(self.command_registry)
-
-        # 注册音乐命令（如果可用）
-        if self.music_commands.is_available():
-            self.music_commands.register_commands(self.command_registry)
-            self.logger.info("✅ 音乐命令注册成功")
-        else:
-            self.logger.warning("❌ 音乐命令未注册（已禁用）")
-
-        self.logger.info("🎵 所有命令注册完成")
+        except Exception as e:
+            self.logger.error(f"❌ Slash Commands 初始化失败: {e}", exc_info=True)
+            raise RuntimeError(f"Slash Commands 初始化失败: {e}") from e
 
     def _setup_event_handlers(self) -> None:
         """设置 Discord 事件处理器。"""
         # 初始化事件处理器（简化版，只处理基本事件）
-        self.event_handler = EventHandler(
-            bot=self.bot,
-            auth_manager=None,
-            unauthorized_handler=None,
-            mega_downloader=None,
-            mega_processor_callback=None
-        )
+        self.event_handler = EventHandler(bot=self.bot,)
 
         self.logger.debug("事件处理器设置完成")
 
@@ -229,6 +194,13 @@ class SimiluBot:
         """机器人就绪时的初始化任务"""
         try:
             self.logger.info(f"🤖 机器人已就绪: {self.bot.user}")
+
+            # 初始化 Slash Commands
+            await self._init_slash_commands()
+
+            # 同步 Slash Commands 到 Discord
+            await self.app_commands_integration.sync_commands()
+            self.logger.info("✅ Slash Commands 已同步到 Discord")
 
             # 初始化持久化系统并恢复队列状态
             if hasattr(self.music_player, 'initialize_persistence'):
@@ -257,13 +229,13 @@ class SimiluBot:
         try:
             self.logger.info("🛑 正在关闭音乐机器人...")
 
-            # 清理音乐命令（如果可用）
-            if hasattr(self, 'music_commands'):
-                await self.music_commands.cleanup()
-
             # 清理音乐播放器（如果可用）
             if hasattr(self, 'music_player'):
                 await self.music_player.cleanup_all()
+
+            # 清理 Slash Commands 集成（如果可用）
+            if hasattr(self, 'app_commands_integration'):
+                await self.app_commands_integration.cleanup()
 
             await self.bot.close()
             self.logger.info("✅ 音乐机器人关闭成功")
@@ -296,20 +268,25 @@ class SimiluBot:
             "bot_ready": self.bot.is_ready(),
             "guild_count": len(self.bot.guilds),
             "user_count": sum(guild.member_count or 0 for guild in self.bot.guilds),
-            "command_count": len(self.command_registry.get_registered_commands()),
-            "music_enabled": self.music_commands.is_available() if hasattr(self, 'music_commands') else False
+            "slash_commands_enabled": hasattr(self, 'app_commands_integration'),
+            "music_enabled": hasattr(self, 'music_player') and self.music_player is not None
         }
 
         return stats
 
     def get_registered_commands(self) -> dict:
         """
-        获取所有已注册的命令。
+        获取已注册的 Slash Commands 列表。
 
         Returns:
             已注册命令的字典
         """
-        return self.command_registry.get_registered_commands()
+        if hasattr(self, 'app_commands_integration'):
+            return {
+                "slash_commands": [cmd.name for cmd in self.bot.tree.get_commands()],
+                "command_count": len(self.bot.tree.get_commands())
+            }
+        return {"slash_commands": [], "command_count": 0}
 
     def is_ready(self) -> bool:
         """

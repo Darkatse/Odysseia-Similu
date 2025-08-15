@@ -14,21 +14,13 @@ class EventHandler:
 
     def __init__(
         self,
-        bot: commands.Bot,
-        auth_manager: Optional = None,
-        unauthorized_handler: Optional = None,
-        mega_downloader: Optional = None,
-        mega_processor_callback: Optional[callable] = None
+        bot: commands.Bot
     ):
         """
         初始化事件处理器。
 
         Args:
             bot: Discord 机器人实例
-            auth_manager: 已弃用，保持兼容性
-            unauthorized_handler: 已弃用，保持兼容性
-            mega_downloader: 已弃用，保持兼容性
-            mega_processor_callback: 已弃用，保持兼容性
         """
         self.logger = logging.getLogger("similubot.events")
         self.bot = bot
