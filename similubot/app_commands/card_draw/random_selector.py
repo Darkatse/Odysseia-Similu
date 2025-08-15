@@ -123,11 +123,19 @@ class RandomSongSelector:
             # 指定用户池
             if not config.target_user_id:
                 raise ValueError("指定用户池模式需要提供target_user_id")
-            return await self.database.get_random_songs(
-                guild_id, 
-                user_id=config.target_user_id, 
+
+            self.logger.debug(f"获取指定用户歌曲 - 服务器: {guild_id}, 目标用户: {config.target_user_id}")
+
+            candidates = await self.database.get_random_songs(
+                guild_id,
+                user_id=config.target_user_id,
                 limit=100
             )
+
+            if not candidates:
+                self.logger.warning(f"指定用户 {config.target_user_id} 在服务器 {guild_id} 中没有歌曲记录")
+
+            return candidates
         
         return []
     

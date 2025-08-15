@@ -171,8 +171,9 @@ class CardDrawCommands(BaseSlashCommand):
             if not await self.check_prerequisites(interaction):
                 return
             
-            # 获取用户的抽卡配置（这里使用默认配置，实际应从用户设置中获取）
-            config = await self._get_user_card_draw_config(interaction.user.id)
+            # 获取用户的抽卡配置
+            guild_id = interaction.guild.id if interaction.guild else 0
+            config = await self._get_user_card_draw_config(interaction.user.id, guild_id)
             
             # 执行抽卡
             await self._handle_card_draw(interaction, config, config.max_redraws)
@@ -202,7 +203,14 @@ class CardDrawCommands(BaseSlashCommand):
             candidates = await self.selector.get_candidates_for_user(
                 guild_id, interaction.user.id, config
             )
+        elif config.source == CardDrawSource.SPECIFIC_USER:
+            # 指定用户池：验证target_user_id并获取候选歌曲
+            if not config.target_user_id:
+                await self.send_error_response(interaction, "指定用户池配置错误：未设置目标用户")
+                return
+            candidates = await self.selector._get_candidates(guild_id, config)
         else:
+            # 全局池
             candidates = await self.selector._get_candidates(guild_id, config)
         
         if not candidates:
@@ -303,23 +311,36 @@ class CardDrawCommands(BaseSlashCommand):
         config: CardDrawConfig
     ) -> None:
         """发送没有可用歌曲的消息"""
-        source_name = {
-            CardDrawSource.GLOBAL: "全局歌曲池",
-            CardDrawSource.PERSONAL: "个人歌曲池",
-            CardDrawSource.SPECIFIC_USER: "指定用户歌曲池"
-        }.get(config.source, "歌曲池")
+        if config.source == CardDrawSource.SPECIFIC_USER:
+            # 指定用户池的特殊处理
+            embed = discord.Embed(
+                title="❌ 抽卡失败",
+                description=f"指定用户 <@{config.target_user_id}> 的歌曲池中没有可用的歌曲",
+                color=discord.Color.orange()
+            )
+            embed.add_field(
+                name="💡 建议",
+                value="该用户可能还没有使用过 `/点歌` 命令，或者可以尝试切换到其他抽卡来源",
+                inline=False
+            )
+        else:
+            # 其他来源类型的通用处理
+            source_name = {
+                CardDrawSource.GLOBAL: "全局歌曲池",
+                CardDrawSource.PERSONAL: "个人歌曲池"
+            }.get(config.source, "歌曲池")
 
-        embed = discord.Embed(
-            title="❌ 抽卡失败",
-            description=f"{source_name}中没有可用的歌曲",
-            color=discord.Color.orange()
-        )
+            embed = discord.Embed(
+                title="❌ 抽卡失败",
+                description=f"{source_name}中没有可用的歌曲",
+                color=discord.Color.orange()
+            )
 
-        embed.add_field(
-            name="💡 建议",
-            value="请先使用 `/点歌` 命令添加一些歌曲到队列，建立歌曲历史记录",
-            inline=False
-        )
+            embed.add_field(
+                name="💡 建议",
+                value="请先使用 `/点歌` 命令添加一些歌曲到队列，建立歌曲历史记录",
+                inline=False
+            )
 
         if interaction.response.is_done():
             await interaction.edit_original_response(embed=embed, view=None)
@@ -429,24 +450,21 @@ class CardDrawCommands(BaseSlashCommand):
         except Exception as e:
             self.logger.error(f"触发公共通知失败: {e}", exc_info=True)
 
-    async def _get_user_card_draw_config(self, user_id: int) -> CardDrawConfig:
+    async def _get_user_card_draw_config(self, user_id: int, guild_id: int) -> CardDrawConfig:
         """
         获取用户的抽卡配置
 
         Args:
             user_id: 用户ID
+            guild_id: 服务器ID
 
         Returns:
             用户抽卡配置
         """
-        # 这里应该从数据库或配置文件中读取用户设置
-        # 暂时返回默认配置
-        card_draw_config = self.config.get('card_draw', {})
-
-        return CardDrawConfig(
-            source=CardDrawSource.GLOBAL,  # 默认全局池
-            max_redraws=card_draw_config.get('max_redraws', 3),
-            timeout_seconds=card_draw_config.get('timeout_seconds', 60)
+        # 从数据库获取用户配置
+        from .source_settings_commands import SourceSettingsCommands
+        return await SourceSettingsCommands.get_user_setting_static(
+            user_id, guild_id, self.database, self.config
         )
 
     def _format_duration(self, duration: int) -> str:

@@ -23,20 +23,20 @@ from .random_selector import RandomSongSelector, CardDrawSource, CardDrawConfig
 class SourceSettingsCommands(BaseSlashCommand):
     """
     抽卡来源设置命令处理器
-    
+
     负责处理 /设置抽卡来源 命令
     """
-    
+
     def __init__(
-        self, 
-        config: ConfigManager, 
+        self,
+        config: ConfigManager,
         music_player: Any,
         database: SongHistoryDatabase,
         selector: RandomSongSelector
     ):
         """
         初始化设置命令处理器
-        
+
         Args:
             config: 配置管理器
             music_player: 音乐播放器实例
@@ -46,9 +46,6 @@ class SourceSettingsCommands(BaseSlashCommand):
         super().__init__(config, music_player)
         self.database = database
         self.selector = selector
-        
-        # 用户设置存储（实际应该使用数据库）
-        self._user_settings = {}
         
         # 初始化消息可见性控制器
         self.message_visibility = MessageVisibility()
@@ -120,7 +117,10 @@ class SourceSettingsCommands(BaseSlashCommand):
             return
         
         # 保存用户设置
-        await self._save_user_setting(user_id, card_source, target_user_id)
+        success = await self._save_user_setting(user_id, guild_id, card_source, target_user_id)
+        if not success:
+            await self._send_error_message(interaction, "保存设置失败，请稍后重试")
+            return
         
         # 发送确认消息
         await self._send_confirmation_message(
@@ -194,55 +194,121 @@ class SourceSettingsCommands(BaseSlashCommand):
             return {'valid': False, 'message': '验证设置时发生错误'}
     
     async def _save_user_setting(
-        self, 
-        user_id: int, 
-        source: CardDrawSource, 
+        self,
+        user_id: int,
+        guild_id: int,
+        source: CardDrawSource,
         target_user_id: Optional[int]
-    ) -> None:
+    ) -> bool:
         """
-        保存用户设置
-        
+        保存用户设置到数据库
+
         Args:
             user_id: 用户ID
+            guild_id: 服务器ID
             source: 抽卡来源
             target_user_id: 目标用户ID
+
+        Returns:
+            保存是否成功
         """
-        # 这里应该保存到数据库，暂时使用内存存储
-        self._user_settings[user_id] = {
-            'source': source,
-            'target_user_id': target_user_id
-        }
-        
-        self.logger.debug(f"保存用户抽卡设置 - 用户: {user_id}, 来源: {source}")
+        success = await self.database.save_card_draw_setting(
+            user_id=user_id,
+            guild_id=guild_id,
+            source=source.value,
+            target_user_id=target_user_id
+        )
+
+        if success:
+            self.logger.debug(f"保存用户抽卡设置成功 - 用户: {user_id}, 服务器: {guild_id}, 来源: {source}")
+        else:
+            self.logger.error(f"保存用户抽卡设置失败 - 用户: {user_id}, 服务器: {guild_id}, 来源: {source}")
+
+        return success
     
-    async def get_user_setting(self, user_id: int) -> CardDrawConfig:
+    async def get_user_setting(self, user_id: int, guild_id: int) -> CardDrawConfig:
         """
         获取用户的抽卡设置
-        
+
         Args:
             user_id: 用户ID
-            
+            guild_id: 服务器ID
+
         Returns:
             用户抽卡配置
         """
-        setting = self._user_settings.get(user_id)
+        setting = await self.database.get_card_draw_setting(user_id, guild_id)
+
+        card_draw_config = self.config.get('card_draw', {})
+
         if not setting:
             # 返回默认设置
-            card_draw_config = self.config.get('card_draw', {})
             return CardDrawConfig(
                 source=CardDrawSource.GLOBAL,
                 max_redraws=card_draw_config.get('max_redraws', 3),
                 timeout_seconds=card_draw_config.get('timeout_seconds', 60)
             )
-        
-        card_draw_config = self.config.get('card_draw', {})
+
+        # 将字符串转换为枚举
+        try:
+            source = CardDrawSource(setting['source'])
+        except ValueError:
+            # 如果数据库中的值无效，使用默认值
+            source = CardDrawSource.GLOBAL
+
         return CardDrawConfig(
-            source=setting['source'],
+            source=source,
             target_user_id=setting['target_user_id'],
             max_redraws=card_draw_config.get('max_redraws', 3),
             timeout_seconds=card_draw_config.get('timeout_seconds', 60)
         )
-    
+
+    @classmethod
+    async def get_user_setting_static(
+        cls,
+        user_id: int,
+        guild_id: int,
+        database: SongHistoryDatabase,
+        config_manager
+    ) -> CardDrawConfig:
+        """
+        静态方法获取用户的抽卡设置（供其他类使用）
+
+        Args:
+            user_id: 用户ID
+            guild_id: 服务器ID
+            database: 数据库实例
+            config_manager: 配置管理器
+
+        Returns:
+            用户抽卡配置
+        """
+        setting = await database.get_card_draw_setting(user_id, guild_id)
+
+        card_draw_config = config_manager.get('card_draw', {})
+
+        if not setting:
+            # 返回默认设置
+            return CardDrawConfig(
+                source=CardDrawSource.GLOBAL,
+                max_redraws=card_draw_config.get('max_redraws', 3),
+                timeout_seconds=card_draw_config.get('timeout_seconds', 60)
+            )
+
+        # 将字符串转换为枚举
+        try:
+            source = CardDrawSource(setting['source'])
+        except ValueError:
+            # 如果数据库中的值无效，使用默认值
+            source = CardDrawSource.GLOBAL
+
+        return CardDrawConfig(
+            source=source,
+            target_user_id=setting['target_user_id'],
+            max_redraws=card_draw_config.get('max_redraws', 3),
+            timeout_seconds=card_draw_config.get('timeout_seconds', 60)
+        )
+
     async def _send_confirmation_message(
         self, 
         interaction: discord.Interaction, 

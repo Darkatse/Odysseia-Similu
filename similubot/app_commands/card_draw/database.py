@@ -61,7 +61,11 @@ class SongHistoryDatabase:
         
         # 数据库连接锁
         self._db_lock = asyncio.Lock()
-        
+
+        # 抽卡设置缓存（可选的性能优化）
+        self._settings_cache: Dict[Tuple[int, int], Dict[str, Any]] = {}
+        self._cache_enabled = True
+
         self.logger.info(f"歌曲历史数据库初始化 - 路径: {self.db_path}")
     
     async def initialize(self) -> bool:
@@ -123,10 +127,34 @@ class SongHistoryDatabase:
                 ''')
                 
                 cursor.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_song_history_source_platform 
+                    CREATE INDEX IF NOT EXISTS idx_song_history_source_platform
                     ON song_history(source_platform)
                 ''')
-                
+
+                # 创建抽卡设置表
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS card_draw_settings (
+                        user_id INTEGER NOT NULL,
+                        guild_id INTEGER NOT NULL,
+                        source TEXT NOT NULL,
+                        target_user_id INTEGER,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (user_id, guild_id)
+                    )
+                ''')
+
+                # 创建抽卡设置表的索引
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_card_draw_settings_guild
+                    ON card_draw_settings(guild_id)
+                ''')
+
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_card_draw_settings_source
+                    ON card_draw_settings(source)
+                ''')
+
                 conn.commit()
                 
             finally:
@@ -379,3 +407,203 @@ class SongHistoryDatabase:
             thumbnail_url=row[10],
             file_format=row[11]
         )
+
+    # ==================== 抽卡设置相关方法 ====================
+
+    async def save_card_draw_setting(
+        self,
+        user_id: int,
+        guild_id: int,
+        source: str,
+        target_user_id: Optional[int] = None
+    ) -> bool:
+        """
+        保存用户的抽卡设置到数据库
+
+        Args:
+            user_id: 用户ID
+            guild_id: 服务器ID
+            source: 抽卡来源类型
+            target_user_id: 目标用户ID（仅在指定用户池时使用）
+
+        Returns:
+            保存是否成功
+        """
+        async with self._db_lock:
+            try:
+                def save_setting():
+                    conn = sqlite3.connect(self.db_path)
+                    try:
+                        cursor = conn.cursor()
+
+                        # 使用UPSERT操作（INSERT OR REPLACE）
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO card_draw_settings
+                            (user_id, guild_id, source, target_user_id, created_at, updated_at)
+                            VALUES (?, ?, ?, ?,
+                                COALESCE((SELECT created_at FROM card_draw_settings
+                                         WHERE user_id = ? AND guild_id = ?), CURRENT_TIMESTAMP),
+                                CURRENT_TIMESTAMP)
+                        ''', (user_id, guild_id, source, target_user_id, user_id, guild_id))
+
+                        conn.commit()
+                        return cursor.rowcount > 0
+
+                    finally:
+                        conn.close()
+
+                loop = asyncio.get_event_loop()
+                success = await loop.run_in_executor(None, save_setting)
+
+                # 更新缓存
+                if success and self._cache_enabled:
+                    cache_key = (user_id, guild_id)
+                    self._settings_cache[cache_key] = {
+                        'source': source,
+                        'target_user_id': target_user_id,
+                        'created_at': datetime.now().isoformat(),
+                        'updated_at': datetime.now().isoformat()
+                    }
+
+                self.logger.debug(f"保存抽卡设置 - 用户: {user_id}, 服务器: {guild_id}, 来源: {source}, 目标用户: {target_user_id}")
+                return success
+
+            except Exception as e:
+                self.logger.error(f"保存抽卡设置失败: {e}", exc_info=True)
+                return False
+
+    async def get_card_draw_setting(
+        self,
+        user_id: int,
+        guild_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        获取用户的抽卡设置
+
+        Args:
+            user_id: 用户ID
+            guild_id: 服务器ID
+
+        Returns:
+            用户设置字典，如果不存在则返回None
+        """
+        # 检查缓存
+        cache_key = (user_id, guild_id)
+        if self._cache_enabled and cache_key in self._settings_cache:
+            setting = self._settings_cache[cache_key]
+            self.logger.debug(f"从缓存获取抽卡设置 - 用户: {user_id}, 服务器: {guild_id}, 来源: {setting['source']}")
+            return setting
+
+        async with self._db_lock:
+            try:
+                def get_setting():
+                    conn = sqlite3.connect(self.db_path)
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            SELECT source, target_user_id, created_at, updated_at
+                            FROM card_draw_settings
+                            WHERE user_id = ? AND guild_id = ?
+                        ''', (user_id, guild_id))
+
+                        row = cursor.fetchone()
+                        if row:
+                            return {
+                                'source': row[0],
+                                'target_user_id': row[1],
+                                'created_at': row[2],
+                                'updated_at': row[3]
+                            }
+                        return None
+
+                    finally:
+                        conn.close()
+
+                loop = asyncio.get_event_loop()
+                setting = await loop.run_in_executor(None, get_setting)
+
+                # 更新缓存
+                if setting and self._cache_enabled:
+                    self._settings_cache[cache_key] = setting
+
+                if setting:
+                    self.logger.debug(f"获取抽卡设置 - 用户: {user_id}, 服务器: {guild_id}, 来源: {setting['source']}")
+                else:
+                    self.logger.debug(f"未找到抽卡设置 - 用户: {user_id}, 服务器: {guild_id}")
+
+                return setting
+
+            except Exception as e:
+                self.logger.error(f"获取抽卡设置失败: {e}", exc_info=True)
+                return None
+
+    async def delete_card_draw_setting(
+        self,
+        user_id: int,
+        guild_id: int
+    ) -> bool:
+        """
+        删除用户的抽卡设置
+
+        Args:
+            user_id: 用户ID
+            guild_id: 服务器ID
+
+        Returns:
+            删除是否成功
+        """
+        async with self._db_lock:
+            try:
+                def delete_setting():
+                    conn = sqlite3.connect(self.db_path)
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            DELETE FROM card_draw_settings
+                            WHERE user_id = ? AND guild_id = ?
+                        ''', (user_id, guild_id))
+
+                        conn.commit()
+                        return cursor.rowcount > 0
+
+                    finally:
+                        conn.close()
+
+                loop = asyncio.get_event_loop()
+                success = await loop.run_in_executor(None, delete_setting)
+
+                # 清除缓存
+                if success and self._cache_enabled:
+                    cache_key = (user_id, guild_id)
+                    self._settings_cache.pop(cache_key, None)
+
+                self.logger.debug(f"删除抽卡设置 - 用户: {user_id}, 服务器: {guild_id}")
+                return success
+
+            except Exception as e:
+                self.logger.error(f"删除抽卡设置失败: {e}", exc_info=True)
+                return False
+
+    def clear_settings_cache(self) -> None:
+        """清空抽卡设置缓存"""
+        self._settings_cache.clear()
+        self.logger.debug("抽卡设置缓存已清空")
+
+    def disable_settings_cache(self) -> None:
+        """禁用抽卡设置缓存"""
+        self._cache_enabled = False
+        self._settings_cache.clear()
+        self.logger.debug("抽卡设置缓存已禁用")
+
+    def enable_settings_cache(self) -> None:
+        """启用抽卡设置缓存"""
+        self._cache_enabled = True
+        self.logger.debug("抽卡设置缓存已启用")
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """获取缓存统计信息"""
+        return {
+            'enabled': self._cache_enabled,
+            'size': len(self._settings_cache),
+            'keys': list(self._settings_cache.keys()) if self._cache_enabled else []
+        }
