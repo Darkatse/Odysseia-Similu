@@ -9,6 +9,7 @@ import os
 import re
 import asyncio
 import logging
+import aiohttp
 from typing import Optional, Tuple
 from urllib.parse import urlparse, parse_qs
 
@@ -87,14 +88,138 @@ class BilibiliProvider(BaseAudioProvider):
 
                 # 处理短链接的情况，需要进一步解析
                 if 'b23.tv' in url or 'bili2233.cn' in url:
-                    # 短链接需要重定向解析，这里简化处理
-                    # 实际应用中可能需要发送 HTTP 请求获取重定向后的真实 URL
-                    self.logger.warning(f"检测到短链接，可能需要手动解析: {url}")
+                    self.logger.debug(f"检测到短链接，开始解析: {url}")
+                    # 注意：这里需要在异步上下文中调用
+                    # 由于此方法是同步的，我们需要在调用方处理异步解析
                     return None
 
                 return video_id
 
         return None
+
+    async def _extract_video_id_async(self, url: str) -> Optional[str]:
+        """
+        从 URL 中提取视频 ID (BV号或AV号) - 异步版本，支持短链接解析
+
+        Args:
+            url: Bilibili 视频 URL
+
+        Returns:
+            视频 ID，提取失败时返回 None
+        """
+        for pattern in self.BILIBILI_URL_PATTERNS:
+            match = re.search(pattern, url)
+            if match:
+                video_id = match.group(1)
+
+                # 处理短链接的情况，需要进一步解析
+                if 'b23.tv' in url or 'bili2233.cn' in url:
+                    self.logger.debug(f"检测到短链接，开始解析: {url}")
+
+                    # 解析短链接获取真实URL
+                    resolved_url = await self._resolve_short_link(url)
+                    if resolved_url:
+                        # 递归调用以从解析后的URL中提取视频ID
+                        return await self._extract_video_id_async(resolved_url)
+                    else:
+                        self.logger.error(f"短链接解析失败: {url}")
+                        return None
+
+                return video_id
+
+        return None
+
+    async def _resolve_short_link(self, short_url: str) -> Optional[str]:
+        """
+        解析短链接，获取重定向后的真实 Bilibili URL
+
+        Args:
+            short_url: 短链接 URL (b23.tv 或 bili2233.cn)
+
+        Returns:
+            重定向后的真实 URL，解析失败时返回 None
+        """
+        try:
+            self.logger.debug(f"开始解析短链接: {short_url}")
+
+            # 设置请求头，模拟浏览器请求
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+
+            # 设置超时时间
+            timeout = aiohttp.ClientTimeout(total=10)
+
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                # 发送 HEAD 请求以获取重定向位置，避免下载完整页面内容
+                async with session.head(
+                    short_url,
+                    headers=headers,
+                    allow_redirects=False,
+                    max_redirects=0
+                ) as response:
+
+                    # 检查是否是重定向响应
+                    if response.status in (301, 302, 303, 307, 308):
+                        redirect_url = response.headers.get('Location')
+                        if redirect_url:
+                            self.logger.debug(f"短链接重定向到: {redirect_url}")
+
+                            # 验证重定向的URL是否为有效的 Bilibili URL
+                            if self._is_valid_bilibili_redirect(redirect_url):
+                                return redirect_url
+                            else:
+                                self.logger.warning(f"重定向URL不是有效的Bilibili链接: {redirect_url}")
+                                return None
+                        else:
+                            self.logger.warning(f"重定向响应缺少Location头: {response.status}")
+                            return None
+                    else:
+                        self.logger.warning(f"短链接未返回重定向响应: {response.status}")
+                        return None
+
+        except asyncio.TimeoutError:
+            self.logger.error(f"解析短链接超时: {short_url}")
+            return None
+        except aiohttp.ClientError as e:
+            self.logger.error(f"解析短链接时网络错误: {e}")
+            return None
+        except Exception as e:
+            self.logger.error(f"解析短链接时发生未知错误: {e}")
+            return None
+
+    def _is_valid_bilibili_redirect(self, url: str) -> bool:
+        """
+        验证重定向的URL是否为有效的 Bilibili 视频链接
+
+        Args:
+            url: 重定向后的URL
+
+        Returns:
+            如果是有效的 Bilibili 视频链接则返回 True
+        """
+        try:
+            # 检查是否匹配标准的 Bilibili URL 模式（排除短链接模式）
+            standard_patterns = [
+                r'https?://(?:www\.)?bilibili\.com/video/(BV[a-zA-Z0-9]{10})',
+                r'https?://(?:www\.)?bilibili\.com/video/(av\d+)',
+            ]
+
+            for pattern in standard_patterns:
+                if re.search(pattern, url):
+                    return True
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"验证重定向URL时发生错误: {e}")
+            return False
 
     def _extract_page_index(self, url: str) -> int:
         """
@@ -158,7 +283,7 @@ class BilibiliProvider(BaseAudioProvider):
         """
         try:
             # 提取视频 ID 和页面索引
-            video_id = self._extract_video_id(url)
+            video_id = await self._extract_video_id_async(url)
             if not video_id:
                 self.logger.error(f"无法从 URL 中提取视频 ID: {url}")
                 return None
@@ -233,7 +358,7 @@ class BilibiliProvider(BaseAudioProvider):
                 ))
             
             # 提取视频 ID 和页面索引
-            video_id = self._extract_video_id(url)
+            video_id = await self._extract_video_id_async(url)
             if not video_id:
                 return False, None, f"无法从 URL 中提取视频 ID: {url}"
 

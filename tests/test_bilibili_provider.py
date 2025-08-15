@@ -117,7 +117,7 @@ class TestBilibiliProvider:
             assert video_id is None, f"从无效 URL {url} 应该返回 None，实际得到 {video_id}"
     
     def test_extract_video_id_short_link(self):
-        """测试短链接处理"""
+        """测试短链接处理（同步版本）"""
         short_urls = [
             "https://b23.tv/abc123",
             "https://bili2233.cn/xyz789"
@@ -127,6 +127,189 @@ class TestBilibiliProvider:
             video_id = self.provider._extract_video_id(url)
             # 短链接应该返回 None，因为需要额外的重定向解析
             assert video_id is None, f"短链接 {url} 应该返回 None 以表示需要进一步处理"
+
+    @pytest.mark.asyncio
+    async def test_resolve_short_link_success(self):
+        """测试成功解析短链接"""
+        short_url = "https://b23.tv/abc123"
+        expected_redirect = "https://www.bilibili.com/video/BV1uv411q7Mv"
+
+        # 模拟HTTP响应
+        mock_response = Mock()
+        mock_response.status = 302
+        mock_response.headers = {'Location': expected_redirect}
+
+        mock_context_manager = AsyncMock()
+        mock_context_manager.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = Mock()
+        mock_session.head = Mock(return_value=mock_context_manager)
+
+        mock_session_context = AsyncMock()
+        mock_session_context.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_context.__aexit__ = AsyncMock(return_value=None)
+
+        with patch('aiohttp.ClientSession', return_value=mock_session_context):
+            result = await self.provider._resolve_short_link(short_url)
+
+        assert result == expected_redirect
+        mock_session.head.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_resolve_short_link_invalid_redirect(self):
+        """测试短链接重定向到无效URL"""
+        short_url = "https://b23.tv/abc123"
+        invalid_redirect = "https://example.com/not-bilibili"
+
+        # 模拟HTTP响应
+        mock_response = Mock()
+        mock_response.status = 302
+        mock_response.headers = {'Location': invalid_redirect}
+
+        mock_context_manager = AsyncMock()
+        mock_context_manager.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = Mock()
+        mock_session.head = Mock(return_value=mock_context_manager)
+
+        mock_session_context = AsyncMock()
+        mock_session_context.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_context.__aexit__ = AsyncMock(return_value=None)
+
+        with patch('aiohttp.ClientSession', return_value=mock_session_context):
+            result = await self.provider._resolve_short_link(short_url)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_short_link_no_redirect(self):
+        """测试短链接没有重定向"""
+        short_url = "https://b23.tv/abc123"
+
+        # 模拟HTTP响应 - 200状态码，不是重定向
+        mock_response = Mock()
+        mock_response.status = 200
+
+        mock_context_manager = AsyncMock()
+        mock_context_manager.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = Mock()
+        mock_session.head = Mock(return_value=mock_context_manager)
+
+        mock_session_context = AsyncMock()
+        mock_session_context.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_context.__aexit__ = AsyncMock(return_value=None)
+
+        with patch('aiohttp.ClientSession', return_value=mock_session_context):
+            result = await self.provider._resolve_short_link(short_url)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_short_link_missing_location_header(self):
+        """测试短链接重定向响应缺少Location头"""
+        short_url = "https://b23.tv/abc123"
+
+        # 模拟HTTP响应 - 302状态码但没有Location头
+        mock_response = Mock()
+        mock_response.status = 302
+        mock_response.headers = {}
+
+        mock_context_manager = AsyncMock()
+        mock_context_manager.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = Mock()
+        mock_session.head = Mock(return_value=mock_context_manager)
+
+        mock_session_context = AsyncMock()
+        mock_session_context.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_context.__aexit__ = AsyncMock(return_value=None)
+
+        with patch('aiohttp.ClientSession', return_value=mock_session_context):
+            result = await self.provider._resolve_short_link(short_url)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_short_link_timeout(self):
+        """测试短链接解析超时"""
+        short_url = "https://b23.tv/abc123"
+
+        with patch('aiohttp.ClientSession', side_effect=asyncio.TimeoutError("Request timeout")):
+            result = await self.provider._resolve_short_link(short_url)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_short_link_network_error(self):
+        """测试短链接解析网络错误"""
+        short_url = "https://b23.tv/abc123"
+
+        with patch('aiohttp.ClientSession', side_effect=aiohttp.ClientError("Network error")):
+            result = await self.provider._resolve_short_link(short_url)
+
+        assert result is None
+
+    def test_is_valid_bilibili_redirect(self):
+        """测试Bilibili重定向URL验证"""
+        valid_urls = [
+            "https://www.bilibili.com/video/BV1uv411q7Mv",
+            "https://bilibili.com/video/BV1234567890",
+            "http://www.bilibili.com/video/BVabcdefghij",
+            "https://www.bilibili.com/video/av123456",
+            "https://bilibili.com/video/av987654321",
+        ]
+
+        invalid_urls = [
+            "https://example.com/video",
+            "https://youtube.com/watch?v=abc123",
+            "https://www.bilibili.com/bangumi/play/ep123456",
+            "https://space.bilibili.com/123456",
+            "https://b23.tv/abc123",  # 短链接不应该被认为是有效的重定向目标
+            "https://bili2233.cn/xyz789",
+        ]
+
+        for url in valid_urls:
+            assert self.provider._is_valid_bilibili_redirect(url), f"应该认为 {url} 是有效的Bilibili重定向URL"
+
+        for url in invalid_urls:
+            assert not self.provider._is_valid_bilibili_redirect(url), f"不应该认为 {url} 是有效的Bilibili重定向URL"
+
+    @pytest.mark.asyncio
+    async def test_extract_video_id_async_short_link_success(self):
+        """测试异步提取视频ID - 短链接成功解析"""
+        short_url = "https://b23.tv/abc123"
+        resolved_url = "https://www.bilibili.com/video/BV1uv411q7Mv"
+        expected_video_id = "BV1uv411q7Mv"
+
+        with patch.object(self.provider, '_resolve_short_link', return_value=resolved_url):
+            result = await self.provider._extract_video_id_async(short_url)
+
+        assert result == expected_video_id
+
+    @pytest.mark.asyncio
+    async def test_extract_video_id_async_short_link_failure(self):
+        """测试异步提取视频ID - 短链接解析失败"""
+        short_url = "https://b23.tv/abc123"
+
+        with patch.object(self.provider, '_resolve_short_link', return_value=None):
+            result = await self.provider._extract_video_id_async(short_url)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_extract_video_id_async_normal_url(self):
+        """测试异步提取视频ID - 普通URL"""
+        normal_url = "https://www.bilibili.com/video/BV1uv411q7Mv"
+        expected_video_id = "BV1uv411q7Mv"
+
+        result = await self.provider._extract_video_id_async(normal_url)
+
+        assert result == expected_video_id
 
     def test_extract_page_index_default(self):
         """测试默认页面索引提取（无 p 参数）"""
@@ -208,7 +391,7 @@ class TestBilibiliProvider:
             {'part': '测试视频标题', 'duration': 300}
         ]
 
-        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+        with patch.object(self.provider, '_extract_video_id_async', return_value="BV1uv411q7Mv"), \
              patch.object(self.provider, '_extract_page_index', return_value=0), \
              patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
              patch('asyncio.run') as mock_asyncio_run:
@@ -231,18 +414,65 @@ class TestBilibiliProvider:
     @pytest.mark.asyncio
     async def test_extract_audio_info_invalid_url(self):
         """测试提取音频信息时 URL 无效"""
-        with patch.object(self.provider, '_extract_video_id', return_value=None):
+        with patch.object(self.provider, '_extract_video_id_async', return_value=None):
             result = await self.provider._extract_audio_info_impl("https://invalid.com/video")
             assert result is None
     
     @pytest.mark.asyncio
     async def test_extract_audio_info_exception(self):
         """测试提取音频信息时发生异常"""
-        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+        with patch.object(self.provider, '_extract_video_id_async', return_value="BV1uv411q7Mv"), \
              patch.object(self.provider, '_create_bilibili_video_object', side_effect=Exception("测试异常")):
 
             result = await self.provider._extract_audio_info_impl("https://www.bilibili.com/video/BV1uv411q7Mv")
             assert result is None
+
+    @pytest.mark.asyncio
+    async def test_extract_audio_info_short_link_success(self):
+        """测试通过短链接成功提取音频信息"""
+        short_url = "https://b23.tv/abc123"
+        resolved_url = "https://www.bilibili.com/video/BV1uv411q7Mv"
+
+        mock_video_info = {
+            'title': '测试视频标题',
+            'duration': 300,
+            'owner': {'name': '测试UP主'},
+            'pic': 'https://example.com/thumbnail.jpg'
+        }
+
+        mock_pages_info = [
+            {'part': '测试视频标题', 'duration': 300}
+        ]
+
+        with patch.object(self.provider, '_resolve_short_link', return_value=resolved_url), \
+             patch.object(self.provider, '_extract_page_index', return_value=0), \
+             patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
+             patch('asyncio.run') as mock_asyncio_run:
+
+            mock_video = Mock()
+            mock_create_video.return_value = mock_video
+
+            # 第一次调用返回视频信息，第二次调用返回页面信息
+            mock_asyncio_run.side_effect = [mock_video_info, mock_pages_info]
+
+            result = await self.provider._extract_audio_info_impl(short_url)
+
+            assert result is not None
+            assert result.title == '测试视频标题'
+            assert result.duration == 300
+            assert result.uploader == '测试UP主'
+            assert result.thumbnail_url == 'https://example.com/thumbnail.jpg'
+            assert result.url == short_url  # 应该保持原始短链接URL
+
+    @pytest.mark.asyncio
+    async def test_extract_audio_info_short_link_resolution_failure(self):
+        """测试短链接解析失败时的音频信息提取"""
+        short_url = "https://b23.tv/abc123"
+
+        with patch.object(self.provider, '_resolve_short_link', return_value=None):
+            result = await self.provider._extract_audio_info_impl(short_url)
+
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_extract_audio_info_multi_part_video(self):
@@ -260,7 +490,7 @@ class TestBilibiliProvider:
             {'part': '第三部分', 'duration': 600},  # 10分钟
         ]
 
-        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+        with patch.object(self.provider, '_extract_video_id_async', return_value="BV1uv411q7Mv"), \
              patch.object(self.provider, '_extract_page_index', return_value=1), \
              patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
              patch('asyncio.run') as mock_asyncio_run:
@@ -294,7 +524,7 @@ class TestBilibiliProvider:
             {'part': '唯一部分', 'duration': 300}
         ]
 
-        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+        with patch.object(self.provider, '_extract_video_id_async', return_value="BV1uv411q7Mv"), \
              patch.object(self.provider, '_extract_page_index', return_value=5), \
              patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
              patch('asyncio.run') as mock_asyncio_run:
@@ -440,7 +670,7 @@ class TestBilibiliProvider:
         progress_callback = Mock()
         progress_callback.update = AsyncMock()
 
-        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+        with patch.object(self.provider, '_extract_video_id_async', return_value="BV1uv411q7Mv"), \
              patch.object(self.provider, '_extract_page_index', return_value=0), \
              patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
              patch.object(self.provider, '_download_audio_stream', return_value=True), \
@@ -488,7 +718,7 @@ class TestBilibiliProvider:
         mock_video_info = {'title': '测试视频', 'duration': 300, 'owner': {'name': '测试UP主'}}
         mock_download_data = {'dash': {'audio': [{'base_url': 'https://example.com/audio.mp3', 'id': 30232}]}}
 
-        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+        with patch.object(self.provider, '_extract_video_id_async', return_value="BV1uv411q7Mv"), \
              patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
              patch.object(self.provider, '_download_audio_stream', return_value=True), \
              patch('similubot.provider.bilibili_provider.VideoDownloadURLDataDetecter') as mock_detector_class, \
@@ -531,7 +761,7 @@ class TestBilibiliProvider:
         mock_video_info = {'title': '测试视频', 'duration': 300, 'owner': {'name': '测试UP主'}}
         mock_download_data = {'dash': {'video': []}}
 
-        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+        with patch.object(self.provider, '_extract_video_id_async', return_value="BV1uv411q7Mv"), \
              patch.object(self.provider, '_extract_page_index', return_value=0), \
              patch.object(self.provider, '_create_bilibili_video_object'), \
              patch('similubot.provider.bilibili_provider.VideoDownloadURLDataDetecter') as mock_detector_class, \
@@ -561,7 +791,7 @@ class TestBilibiliProvider:
         mock_video_info = {'title': '测试视频', 'duration': 300, 'owner': {'name': '测试UP主'}}
         mock_download_data = {'durl': [{'url': 'https://example.com/video.flv'}]}
 
-        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+        with patch.object(self.provider, '_extract_video_id_async', return_value="BV1uv411q7Mv"), \
              patch.object(self.provider, '_extract_page_index', return_value=0), \
              patch.object(self.provider, '_create_bilibili_video_object'), \
              patch('similubot.provider.bilibili_provider.VideoDownloadURLDataDetecter') as mock_detector_class, \
@@ -590,7 +820,7 @@ class TestBilibiliProvider:
         mock_video_info = {'title': '测试视频', 'duration': 300, 'owner': {'name': '测试UP主'}}
         mock_download_data = {'dash': {'audio': [{'base_url': 'https://example.com/audio.mp3', 'id': 30232}]}}
 
-        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+        with patch.object(self.provider, '_extract_video_id_async', return_value="BV1uv411q7Mv"), \
              patch.object(self.provider, '_extract_page_index', return_value=0), \
              patch.object(self.provider, '_create_bilibili_video_object'), \
              patch.object(self.provider, '_download_audio_stream', return_value=False), \
@@ -619,14 +849,12 @@ class TestBilibiliProvider:
             assert audio_info is None
             assert "音频文件下载失败" in error
 
-
-@pytest.mark.skipif(BILIBILI_PROVIDER_AVAILABLE, reason="测试依赖不可用时的行为")
-class TestBilibiliProviderUnavailable:
-    """测试 Bilibili 提供者依赖不可用时的行为"""
-
     @pytest.mark.asyncio
-    async def test_download_audio_impl_multi_part_video(self):
-        """测试多P视频下载时使用正确的页面索引和时长"""
+    async def test_download_audio_impl_multi_part_video_with_short_link(self):
+        """测试通过短链接下载多P视频"""
+        short_url = "https://b23.tv/abc123"
+        resolved_url = "https://www.bilibili.com/video/BV1uv411q7Mv?p=2"
+
         mock_video_info = {
             'title': '测试合集视频',
             'duration': 1800,  # 总时长30分钟
@@ -642,7 +870,7 @@ class TestBilibiliProviderUnavailable:
 
         mock_download_data = {'dash': {'audio': [{'base_url': 'https://example.com/audio.mp3', 'id': 30232}]}}
 
-        with patch.object(self.provider, '_extract_video_id', return_value="BV1uv411q7Mv"), \
+        with patch.object(self.provider, '_resolve_short_link', return_value=resolved_url), \
              patch.object(self.provider, '_extract_page_index', return_value=1), \
              patch.object(self.provider, '_create_bilibili_video_object') as mock_create_video, \
              patch.object(self.provider, '_download_audio_stream', return_value=True), \
@@ -667,9 +895,7 @@ class TestBilibiliProviderUnavailable:
             mock_detector.detect_best_streams.return_value = [None, mock_audio_stream]
             mock_detector_class.return_value = mock_detector
 
-            success, audio_info, error = await self.provider._download_audio_impl(
-                "https://www.bilibili.com/video/BV1uv411q7Mv?p=2"
-            )
+            success, audio_info, error = await self.provider._download_audio_impl(short_url)
 
             assert success is True
             assert audio_info is not None
@@ -678,6 +904,12 @@ class TestBilibiliProviderUnavailable:
             assert audio_info.duration == 450  # 应该是第二部分的时长，不是总时长
             assert audio_info.uploader == '测试UP主'
             assert audio_info.file_format == 'mp3'
+            assert audio_info.url == short_url  # 应该保持原始短链接URL
+
+
+@pytest.mark.skipif(not BILIBILI_PROVIDER_AVAILABLE, reason="测试依赖不可用时的行为")
+class TestBilibiliProviderUnavailable:
+    """测试 Bilibili 提供者依赖不可用时的行为"""
 
     def test_import_error_handling(self):
         """测试导入错误处理"""
