@@ -542,7 +542,7 @@ class PlaybackEngine(IPlaybackEngine):
                 if audio_info.file_path and os.path.exists(audio_info.file_path):
                     await self._play_audio_file(guild_id, audio_info.file_path, song)
                 else:
-                    # 直接播放URL（如Catbox）
+                    # 直接播放URL，需要处理网易云的规范化URL
                     await self._play_audio_url(guild_id, song.url, song)
 
         except Exception as e:
@@ -606,12 +606,64 @@ class PlaybackEngine(IPlaybackEngine):
         except Exception as e:
             self.logger.error(f"播放音频文件失败: {e}")
             self._cleanup_playback_tracking(guild_id)
-    
+
+    async def _resolve_playable_url(self, url: str) -> Optional[str]:
+        """
+        解析URL为可播放的直链
+
+        对于网易云音乐的规范化URL，需要调用 resolve_playable_url 方法
+        对于其他URL，直接返回原始URL
+
+        Args:
+            url: 原始URL（可能是规范化URL）
+
+        Returns:
+            可播放的直链URL，解析失败时返回None
+        """
+        try:
+            # 检测URL对应的提供者
+            provider = self.audio_provider_factory.detect_provider_for_url(url)
+
+            if provider and provider.name.lower() == 'netease':
+                # 对于网易云音乐，需要解析规范化URL为可播放直链
+                self.logger.debug(f"解析网易云规范化URL: {url}")
+
+                # 检查是否有 resolve_playable_url 方法（新版本的 NetEaseProvider）
+                if hasattr(provider, 'resolve_playable_url'):
+                    playable_url = await provider.resolve_playable_url(url)
+                    if playable_url:
+                        self.logger.debug(f"成功解析网易云播放链接: {url} -> {playable_url[:100]}...")
+                        return playable_url
+                    else:
+                        self.logger.error(f"网易云播放链接解析失败: {url}")
+                        return None
+                else:
+                    # 兼容旧版本的 NetEaseProvider，直接使用原始URL
+                    self.logger.debug(f"使用兼容模式，直接返回原始URL: {url}")
+                    return url
+            else:
+                # 对于其他提供者（YouTube、Catbox等），直接使用原始URL
+                self.logger.debug(f"非网易云URL，直接使用原始URL: {url}")
+                return url
+
+        except Exception as e:
+            self.logger.error(f"解析播放URL时出错: {e}", exc_info=True)
+            return None
+
     async def _play_audio_url(self, guild_id: int, url: str, song: SongInfo) -> None:
         """播放音频URL"""
         try:
+            # 处理网易云的规范化URL，需要解析为可播放直链
+            playable_url = await self._resolve_playable_url(url)
+            if not playable_url:
+                self.logger.error(f"无法解析播放链接: {url}")
+                # 跳过这首歌，直接返回让播放循环继续到下一首
+                return
+
+            self.logger.debug(f"使用播放链接: {playable_url}")
+
             # 创建音频源
-            audio_source = discord.FFmpegPCMAudio(url)
+            audio_source = discord.FFmpegPCMAudio(playable_url)
 
             # 播放完成事件
             playback_finished = asyncio.Event()

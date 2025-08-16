@@ -36,7 +36,7 @@ class AudioProviderFactory:
         self._providers: List[IAudioProvider] = [
             YouTubeProvider(temp_dir, config),
             CatboxProvider(temp_dir),
-            NetEaseProvider(temp_dir),
+            NetEaseProvider(temp_dir, config),  # 传递配置给网易云提供者
             BilibiliProvider(temp_dir)
         ]
 
