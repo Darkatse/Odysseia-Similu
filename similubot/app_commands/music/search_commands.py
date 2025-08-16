@@ -608,6 +608,11 @@ class MusicSearchCommands(BaseSlashCommand):
                         value=f"第 {position} 位",
                         inline=True
                     )
+                    embed.add_field(
+                        name="点歌人",
+                        value=interaction.user.display_name,
+                        inline=True
+                    )
                     await interaction.followup.send(embed=embed) # 呃啊居然不能用respond而是followup吗
                 else:
                     await self.send_error_response(interaction, error_msg or "替换歌曲失败")
