@@ -89,12 +89,12 @@ class CommandRegistry:
 
     def _register_song_request_command(self) -> None:
         """注册点歌命令"""
-        @self.bot.tree.command(name="点歌", description="搜索并添加歌曲到播放队列")
-        @app_commands.describe(
-            链接或名字="歌曲链接(YouTube/NetEase/Bilibili/Catbox)或搜索关键词"
-        )
-        async def song_request(interaction: discord.Interaction, 链接或名字: str):
-            """点歌命令处理器"""
+        async def _handle_song_request(
+            interaction: discord.Interaction,
+            query: str,
+            command_label: str
+        ) -> None:
+            """点歌命令执行逻辑"""
             try:
                 from ..music.search_commands import MusicSearchCommands
                 from similubot.utils.config_manager import ConfigManager
@@ -103,11 +103,27 @@ class CommandRegistry:
                 music_player = list(self.service_provider.container._singletons.values())[1]
 
                 handler = MusicSearchCommands(config, music_player)
-                await handler.execute(interaction, query=链接或名字)
+                await handler.execute(interaction, query=query)
 
             except Exception as e:
-                self.logger.error(f"点歌命令执行失败: {e}", exc_info=True)
-                await self._send_error_response(interaction, "点歌命令执行失败")
+                self.logger.error(f"{command_label}命令执行失败: {e}", exc_info=True)
+                await self._send_error_response(interaction, f"{command_label}命令执行失败")
+
+        @self.bot.tree.command(name="点歌", description="搜索并添加歌曲到播放队列")
+        @app_commands.describe(
+            链接或名字="歌曲链接(YouTube/NetEase/Bilibili/Catbox)或搜索关键词"
+        )
+        async def song_request(interaction: discord.Interaction, 链接或名字: str):
+            """点歌命令处理器"""
+            await _handle_song_request(interaction, 链接或名字, "点歌")
+
+        @self.bot.tree.command(name="music", description="Search and add songs to the playback queue")
+        @app_commands.describe(
+            link_or_name="Song link (YouTube/NetEase/Bilibili/Catbox) or search keywords"
+        )
+        async def song_request_en(interaction: discord.Interaction, link_or_name: str):
+            """Music command handler"""
+            await _handle_song_request(interaction, link_or_name, "music")
 
     def _register_queue_commands(self) -> None:
         """注册队列相关命令"""
