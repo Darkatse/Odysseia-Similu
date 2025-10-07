@@ -18,6 +18,9 @@ pytubefix>=6.0.0
 # Bilibili video processing
 bilibili-api-python>=17.0.0
 
+# SoundCloud integration
+soundcloud-lib>=0.6.1
+
 # Testing framework
 pytest>=7.0.0
 pytest-asyncio>=0.18.0

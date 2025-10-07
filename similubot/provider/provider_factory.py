@@ -11,6 +11,7 @@ from .youtube_provider import YouTubeProvider
 from .catbox_provider import CatboxProvider
 from .netease_provider import NetEaseProvider
 from .bilibili_provider import BilibiliProvider
+from .soundcloud_provider import SoundCloudProvider
 
 
 class AudioProviderFactory:
@@ -37,7 +38,8 @@ class AudioProviderFactory:
             YouTubeProvider(temp_dir, config),
             CatboxProvider(temp_dir),
             NetEaseProvider(temp_dir, config),  # 传递配置给网易云提供者
-            BilibiliProvider(temp_dir)
+            BilibiliProvider(temp_dir),
+            SoundCloudProvider(temp_dir)
         ]
 
         # 创建提供者映射
@@ -45,7 +47,8 @@ class AudioProviderFactory:
             'youtube': self._providers[0],
             'catbox': self._providers[1],
             'netease': self._providers[2],
-            'bilibili': self._providers[3]
+            'bilibili': self._providers[3],
+            'soundcloud': self._providers[4]
         }
 
     def get_supported_providers(self) -> List[str]:
@@ -122,6 +125,15 @@ class AudioProviderFactory:
             'https://catbox.moe/*.m4a',
             'https://catbox.moe/*.aac',
             'https://catbox.moe/*.wma'
+        ]
+
+        # SoundCloud 模式
+        patterns['soundcloud'] = [
+            'https://soundcloud.com/*/*',
+            'https://m.soundcloud.com/*/*',
+            'https://on.soundcloud.com/*',
+            'https://soundcloud.app.goo.gl/*',
+            'https://snd.sc/*'
         ]
         
         return patterns

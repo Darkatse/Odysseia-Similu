@@ -384,6 +384,8 @@ class MusicSearchCommands(BaseSlashCommand):
                 return await self.music_player.catbox_client.extract_audio_info(url)
             elif source_type and source_type.value == "bilibili":
                 return await self.music_player.bilibili_client.extract_audio_info(url)
+            elif source_type and source_type.value == "soundcloud":
+                return await self.music_player.soundcloud_client.extract_audio_info(url)
             elif source_type and source_type.value == "netease":
                 return await self.music_player.netease_client.extract_audio_info(url)
 

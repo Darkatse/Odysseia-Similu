@@ -8,11 +8,13 @@
 from .base import BaseAudioProvider
 from .youtube_provider import YouTubeProvider
 from .catbox_provider import CatboxProvider
+from .soundcloud_provider import SoundCloudProvider
 from .provider_factory import AudioProviderFactory
 
 __all__ = [
     "BaseAudioProvider",
     "YouTubeProvider", 
     "CatboxProvider",
+    "SoundCloudProvider",
     "AudioProviderFactory"
 ]

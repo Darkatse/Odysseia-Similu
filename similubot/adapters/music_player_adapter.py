@@ -20,6 +20,7 @@ class AudioSourceType(Enum):
     YOUTUBE = "youtube"
     CATBOX = "catbox"
     BILIBILI = "bilibili"
+    SOUNDCLOUD = "soundcloud"
 
 class MusicPlayerAdapter:
     """
@@ -48,6 +49,7 @@ class MusicPlayerAdapter:
         self.youtube_client = self._create_youtube_client_adapter()
         self.catbox_client = self._create_catbox_client_adapter()
         self.bilibili_client = self._create_bilibili_client_adapter()
+        self.soundcloud_client = self._create_soundcloud_client_adapter()
         self.voice_manager = playback_engine.voice_manager
         self.seek_manager = playback_engine.seek_manager
         
@@ -140,6 +142,20 @@ class MusicPlayerAdapter:
 
         return BilibiliClientAdapter(self._playback_engine.audio_provider_factory)
 
+    def _create_soundcloud_client_adapter(self):
+        """创建 SoundCloud 客户端适配器"""
+        class SoundCloudClientAdapter:
+            def __init__(self, provider_factory):
+                self.provider_factory = provider_factory
+                self.soundcloud_provider = provider_factory.get_provider_by_name('soundcloud')
+
+            async def extract_audio_info(self, url: str):
+                if self.soundcloud_provider:
+                    return await self.soundcloud_provider.extract_audio_info(url)
+                return None
+
+        return SoundCloudClientAdapter(self._playback_engine.audio_provider_factory)
+
     def is_supported_url(self, url: str) -> bool:
         """
         检查URL是否被支持
@@ -173,6 +189,8 @@ class MusicPlayerAdapter:
             return AudioSourceType.CATBOX
         elif provider_name == 'bilibili':
             return AudioSourceType.BILIBILI
+        elif provider_name == 'soundcloud':
+            return AudioSourceType.SOUNDCLOUD
 
         return None
     

@@ -231,10 +231,14 @@ pytest
 - [discord.py](https://github.com/Rapptz/discord.py) - Python Discord API 封装库
 - [pytubefix](https://github.com/JuanBindez/pytubefix) - YouTube 视频下载库
 - [FFmpeg](https://ffmpeg.org/) - 音频/视频处理工具
+- [bilibili-api-python](https://github.com/nemo2011/bilibili-api) Python Bilibili API库
 
 ### 网易云音乐支持
 - [保罗 API](https://api.paugram.com/help/netease) - 提供网易云音乐 API 代理服务，解决海外访问限制
 - [pyncm](https://github.com/mos9527/pyncm) - Python 网易云音乐 API 库，为会员认证和加密算法提供参考实现
+
+### SoundCloud下载支持
+- [Soundcloud-lib](https://github.com/3jackdaws/soundcloud-lib) - Python SoundCloud API库，帮助实现下载功能
 
 ## 支持
 
